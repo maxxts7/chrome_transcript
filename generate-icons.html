@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Generate Extension Icons</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .icon-preview { margin: 20px 0; }
+        canvas { border: 1px solid #ccc; margin: 10px; }
+    </style>
+</head>
+<body>
+    <h1>Click and Error Logger - Icon Generator</h1>
+    <p>This page generates the required PNG icons for the Chrome extension.</p>
+    
+    <div class="icon-preview">
+        <h3>16x16 Icon</h3>
+        <canvas id="canvas16" width="16" height="16"></canvas>
+        <button onclick="downloadIcon('canvas16', 'icon16.png')">Download 16x16</button>
+    </div>
+    
+    <div class="icon-preview">
+        <h3>48x48 Icon</h3>
+        <canvas id="canvas48" width="48" height="48"></canvas>
+        <button onclick="downloadIcon('canvas48', 'icon48.png')">Download 48x48</button>
+    </div>
+    
+    <div class="icon-preview">
+        <h3>32x32 Icon</h3>
+        <canvas id="canvas32" width="32" height="32"></canvas>
+        <button onclick="downloadIcon('canvas32', 'icon32.png')">Download 32x32</button>
+    </div>
+    
+    <div class="icon-preview">
+        <h3>128x128 Icon</h3>
+        <canvas id="canvas128" width="128" height="128"></canvas>
+        <button onclick="downloadIcon('canvas128', 'icon128.png')">Download 128x128</button>
+    </div>
+
+    <script>
+        function drawIcon(canvas, size) {
+            const ctx = canvas.getContext('2d');
+            const scale = size / 128;
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, size, size);
+            
+            // Create gradient background
+            const gradient = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
+            gradient.addColorStop(0, '#4A90E2');
+            gradient.addColorStop(1, '#2C5282');
+            
+            // Draw background circle
+            ctx.beginPath();
+            ctx.arc(size/2, size/2, size/2 - 2*scale, 0, 2 * Math.PI);
+            ctx.fillStyle = gradient;
+            ctx.fill();
+            
+            // Add subtle border
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.lineWidth = Math.max(1, 1*scale);
+            ctx.stroke();
+            
+            // Draw cursor/pointer icon
+            const cursorSize = 40 * scale;
+            const cursorX = size/2 - 8*scale;
+            const cursorY = size/2 - 8*scale;
+            
+            // Cursor body (white)
+            ctx.fillStyle = 'white';
+            ctx.beginPath();
+            ctx.moveTo(cursorX, cursorY);
+            ctx.lineTo(cursorX, cursorY + cursorSize);
+            ctx.lineTo(cursorX + 8*scale, cursorY + cursorSize - 12*scale);
+            ctx.lineTo(cursorX + 16*scale, cursorY + cursorSize - 8*scale);
+            ctx.lineTo(cursorX + 20*scale, cursorY + cursorSize - 16*scale);
+            ctx.lineTo(cursorX + 12*scale, cursorY + cursorSize - 20*scale);
+            ctx.lineTo(cursorX + 16*scale, cursorY + cursorSize - 32*scale);
+            ctx.closePath();
+            ctx.fill();
+            
+            // Cursor shadow/outline
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = Math.max(1, 1.5*scale);
+            ctx.stroke();
+            
+            // Add click indicator (small circle)
+            ctx.fillStyle = '#FF6B6B';
+            ctx.beginPath();
+            ctx.arc(cursorX + 24*scale, cursorY + 8*scale, 6*scale, 0, 2 * Math.PI);
+            ctx.fill();
+            
+            // Add error indicator (exclamation mark)
+            ctx.fillStyle = '#FFA500';
+            ctx.beginPath();
+            ctx.arc(cursorX - 8*scale, cursorY + 32*scale, 8*scale, 0, 2 * Math.PI);
+            ctx.fill();
+            
+            // Draw exclamation mark
+            ctx.fillStyle = 'white';
+            ctx.font = `bold ${12*scale}px Arial`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('!', cursorX - 8*scale, cursorY + 32*scale);
+        }
+        
+        function downloadIcon(canvasId, filename) {
+            const canvas = document.getElementById(canvasId);
+            const link = document.createElement('a');
+            link.download = filename;
+            link.href = canvas.toDataURL();
+            link.click();
+        }
+        
+        // Generate all icons on page load
+        window.onload = function() {
+            drawIcon(document.getElementById('canvas16'), 16);
+            drawIcon(document.getElementById('canvas32'), 32);
+            drawIcon(document.getElementById('canvas48'), 48);
+            drawIcon(document.getElementById('canvas128'), 128);
+        };
+    </script>
+</body>
+</html>

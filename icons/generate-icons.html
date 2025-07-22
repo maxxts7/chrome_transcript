@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Generate Extension Icons</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .icon-preview { margin: 20px 0; }
+        canvas { border: 1px solid #ccc; margin: 10px; }
+    </style>
+</head>
+<body>
+    <h1>YouTube Transcript Extractor - Icon Generator</h1>
+    <p>This page generates the required PNG icons for the Chrome extension.</p>
+    
+    <div class="icon-preview">
+        <h3>16x16 Icon</h3>
+        <canvas id="canvas16" width="16" height="16"></canvas>
+        <button onclick="downloadIcon('canvas16', 'icon16.png')">Download 16x16</button>
+    </div>
+    
+    <div class="icon-preview">
+        <h3>48x48 Icon</h3>
+        <canvas id="canvas48" width="48" height="48"></canvas>
+        <button onclick="downloadIcon('canvas48', 'icon48.png')">Download 48x48</button>
+    </div>
+    
+    <div class="icon-preview">
+        <h3>128x128 Icon</h3>
+        <canvas id="canvas128" width="128" height="128"></canvas>
+        <button onclick="downloadIcon('canvas128', 'icon128.png')">Download 128x128</button>
+    </div>
+
+    <script>
+        function drawIcon(canvas, size) {
+            const ctx = canvas.getContext('2d');
+            const scale = size / 128;
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, size, size);
+            
+            // Create gradient
+            const gradient = ctx.createLinearGradient(0, 0, size, size);
+            gradient.addColorStop(0, '#FF0000');
+            gradient.addColorStop(1, '#CC0000');
+            
+            // Draw background circle
+            ctx.beginPath();
+            ctx.arc(size/2, size/2, size/2 - 4*scale, 0, 2 * Math.PI);
+            ctx.fillStyle = gradient;
+            ctx.fill();
+            
+            // Draw document background
+            const docWidth = 64 * scale;
+            const docHeight = 80 * scale;
+            const docX = (size - docWidth) / 2;
+            const docY = 24 * scale;
+            
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+            ctx.fillRect(docX, docY, docWidth, docHeight);
+            
+            // Draw text lines
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = Math.max(1, 2 * scale);
+            ctx.lineCap = 'round';
+            
+            const lineStartX = docX + 8 * scale;
+            const lineEndX = docX + docWidth - 8 * scale;
+            
+            for (let i = 0; i < 8; i++) {
+                const y = docY + 12 * scale + (i * 8 * scale);
+                const endX = lineEndX - (i % 3) * 6 * scale;
+                
+                ctx.beginPath();
+                ctx.moveTo(lineStartX, y);
+                ctx.lineTo(endX, y);
+                ctx.stroke();
+            }
+            
+            // Draw YouTube play button
+            const buttonRadius = 16 * scale;
+            const buttonX = size / 2;
+            const buttonY = size / 2;
+            
+            ctx.beginPath();
+            ctx.arc(buttonX, buttonY, buttonRadius, 0, 2 * Math.PI);
+            ctx.fillStyle = '#FF0000';
+            ctx.fill();
+            
+            // Draw play triangle
+            ctx.fillStyle = 'white';
+            ctx.beginPath();
+            const triangleSize = 8 * scale;
+            ctx.moveTo(buttonX - triangleSize/2, buttonY - triangleSize);
+            ctx.lineTo(buttonX - triangleSize/2, buttonY + triangleSize);
+            ctx.lineTo(buttonX + triangleSize, buttonY);
+            ctx.closePath();
+            ctx.fill();
+        }
+        
+        function downloadIcon(canvasId, filename) {
+            const canvas = document.getElementById(canvasId);
+            const link = document.createElement('a');
+            link.download = filename;
+            link.href = canvas.toDataURL();
+            link.click();
+        }
+        
+        // Generate all icons on page load
+        window.onload = function() {
+            drawIcon(document.getElementById('canvas16'), 16);
+            drawIcon(document.getElementById('canvas48'), 48);
+            drawIcon(document.getElementById('canvas128'), 128);
+        };
+    </script>
+</body>
+</html>

@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {
+      width: 400px;
+      max-height: 600px;
+      padding: 0;
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      overflow: hidden;
+    }
+
+    .header {
+      padding: 20px;
+      text-align: center;
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    h1 {
+      margin: 0 0 5px 0;
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .version {
+      font-size: 12px;
+      opacity: 0.8;
+    }
+
+    .controls {
+      padding: 15px 20px;
+      background: rgba(255, 255, 255, 0.05);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .btn-group {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .action-btn {
+      flex: 1;
+      background: #00ff88;
+      color: #2C5282;
+      border: none;
+      padding: 10px 16px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .action-btn:hover {
+      background: #00e676;
+    }
+
+    .action-btn:disabled {
+      background: #666;
+      color: #ccc;
+      cursor: not-allowed;
+    }
+
+    .copy-btn {
+      background: #4CAF50;
+    }
+
+    .copy-btn:hover {
+      background: #45a049;
+    }
+
+    .export-btn {
+      background: #2196F3;
+    }
+
+    .export-btn:hover {
+      background: #0b7dda;
+    }
+
+    .status {
+      font-size: 12px;
+      opacity: 0.9;
+      text-align: center;
+      margin-bottom: 10px;
+    }
+
+    .transcript-container {
+      height: 400px;
+      overflow-y: auto;
+      background: rgba(0, 0, 0, 0.3);
+      margin: 0 20px 20px 20px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .transcript-content {
+      padding: 15px;
+    }
+
+    .transcript-empty {
+      text-align: center;
+      color: rgba(255, 255, 255, 0.7);
+      padding: 40px 20px;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .transcript-segment {
+      margin-bottom: 12px;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .transcript-segment:last-child {
+      border-bottom: none;
+    }
+
+    .timestamp {
+      color: #00ff88;
+      font-size: 11px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .transcript-text {
+      font-size: 13px;
+      line-height: 1.4;
+      color: rgba(255, 255, 255, 0.95);
+    }
+
+    .video-info {
+      background: rgba(255, 255, 255, 0.1);
+      padding: 10px 15px;
+      margin-bottom: 15px;
+      border-radius: 6px;
+      font-size: 12px;
+    }
+
+    .video-title {
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .video-url {
+      opacity: 0.8;
+      word-break: break-all;
+    }
+
+    /* Scrollbar styling */
+    .transcript-container::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .transcript-container::-webkit-scrollbar-track {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 3px;
+    }
+
+    .transcript-container::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.3);
+      border-radius: 3px;
+    }
+
+    .transcript-container::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.5);
+    }
+
+    .stats {
+      background: rgba(255, 255, 255, 0.1);
+      padding: 8px 15px;
+      border-radius: 6px;
+      font-size: 11px;
+      margin-bottom: 15px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>📝 Transcript Extractor</h1>
+    <div class="version" id="version">v1.0</div>
+  </div>
+
+  <div class="controls">
+    <div class="btn-group">
+      <button id="extract-btn" class="action-btn">Extract Transcript</button>
+    </div>
+    
+    <div class="btn-group">
+      <button id="copy-btn" class="action-btn copy-btn" disabled>Copy Text</button>
+      <button id="export-btn" class="action-btn export-btn" disabled>Export TXT</button>
+    </div>
+    
+    <div id="status" class="status">Ready to extract transcript</div>
+  </div>
+
+  <div class="transcript-container">
+    <div class="transcript-content">
+      <div id="transcript-empty" class="transcript-empty">
+        <div>📺 Open a YouTube video with transcript/captions</div>
+        <div style="margin-top: 10px;">Click "Extract Transcript" to get started</div>
+      </div>
+      <div id="transcript-data" style="display: none;"></div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
