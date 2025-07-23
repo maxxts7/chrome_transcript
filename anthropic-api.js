@@ -169,7 +169,7 @@ class AnthropicAPI {
   }
 
   // Extract key points from transcript
-  async extractKeyPoints(transcript, customPrompt = null) {
+  async extractKeyPoints(transcript) {
     if (!this.apiKey) {
       throw new Error('API key not configured');
     }
@@ -181,29 +181,16 @@ class AnthropicAPI {
     // Combine transcript segments into full text
     const fullText = transcript.segments.map(segment => segment.text).join(' ');
     
-    const defaultPrompt = `Please analyze this YouTube video transcript and extract the key points. Structure your response as follows:
+    // Check if prompts are loaded
+    if (!window.KEY_POINTS_PROMPT) {
+      throw new Error('KEY_POINTS_PROMPT is not loaded. Please ensure prompts.js is included and loaded.');
+    }
 
-**Main Topics:**
-- List the 3-5 main topics or themes discussed
-
-**Key Insights:**
-- Extract 5-8 important insights, facts, or takeaways
-- Include any statistics, quotes, or specific examples mentioned
-
-**Actionable Points:**
-- List any actionable advice, tips, or recommendations
-- Include step-by-step processes if mentioned
-
-**Important Quotes:**
-- Extract 2-3 significant quotes or statements that capture the essence
-
-Format your response in clear, organized sections with bullet points.
-
-Video Title: ${transcript.title || 'YouTube Video'}
-Transcript:
-${fullText}`;
-
-    const prompt = customPrompt || defaultPrompt;
+    // Use prompt template with variable replacement
+    const prompt = this.replaceTemplateVariables(window.KEY_POINTS_PROMPT, {
+      VIDEO_TITLE: transcript.title || 'YouTube Video',
+      TRANSCRIPT: fullText
+    });
 
     const messages = [
       {
@@ -222,7 +209,7 @@ ${fullText}`;
   }
 
   // Generate article from key points
-  async generateArticle(keyPoints, transcript, articleStyle = 'blog', customPrompt = null) {
+  async generateArticle(keyPoints, transcript) {
     if (!this.apiKey) {
       throw new Error('API key not configured');
     }
@@ -231,42 +218,17 @@ ${fullText}`;
       throw new Error('Key points and transcript data required');
     }
 
-    const stylePrompts = {
-      blog: 'Write a comprehensive blog post with an engaging introduction, well-structured body sections, and a compelling conclusion. Use headings and subheadings to organize the content.',
-      summary: 'Write a concise executive summary that captures the essence of the content in a structured, professional format.',
-      tutorial: 'Write a step-by-step tutorial or guide format that readers can follow. Include clear instructions and practical examples.',
-      analysis: 'Write an in-depth analysis that examines the topics critically, discusses implications, and provides thoughtful commentary.',
-      listicle: 'Write in a listicle format with numbered or bulleted sections, making the content scannable and easy to digest.'
-    };
+    // Check if prompts are loaded
+    if (!window.ARTICLE_GENERATION_PROMPT) {
+      throw new Error('ARTICLE_GENERATION_PROMPT is not loaded. Please ensure prompts.js is included and loaded.');
+    }
 
-    const styleInstruction = stylePrompts[articleStyle] || stylePrompts.blog;
-
-    const defaultPrompt = `Based on the key points extracted from this YouTube video, please write a well-structured article. 
-
-${styleInstruction}
-
-Requirements:
-- Write in a professional, engaging tone
-- Use proper headings and formatting
-- Include specific examples and details from the original content
-- Make it informative and valuable for readers
-- Aim for 800-1200 words
-- Include a compelling title
-
-Video Title: ${transcript.title || 'YouTube Video'}
-
-Key Points to Base Article On:
-${keyPoints}
-
-Please structure the article with:
-# Title
-## Introduction
-## Main Content Sections (with appropriate headings)
-## Conclusion
-
-Focus on creating valuable, original content that expands on the key points while maintaining accuracy to the source material.`;
-
-    const prompt = customPrompt || defaultPrompt;
+    // Use prompt template with variable replacement
+    const prompt = this.replaceTemplateVariables(window.ARTICLE_GENERATION_PROMPT, {
+      VIDEO_TITLE: transcript.title || 'YouTube Video',
+      KEY_POINTS: keyPoints,
+      TRANSCRIPT: transcript.segments.map(segment => segment.text).join(' ')
+    });
 
     const messages = [
       {
@@ -285,13 +247,13 @@ Focus on creating valuable, original content that expands on the key points whil
   }
 
   // Combined method to extract key points and generate article
-  async processTranscript(transcript, articleStyle = 'blog', keyPointsPrompt = null, articlePrompt = null) {
+  async processTranscript(transcript) {
     try {
       // Step 1: Extract key points
-      const keyPoints = await this.extractKeyPoints(transcript, keyPointsPrompt);
+      const keyPoints = await this.extractKeyPoints(transcript);
       
       // Step 2: Generate article from key points
-      const article = await this.generateArticle(keyPoints, transcript, articleStyle, articlePrompt);
+      const article = await this.generateArticle(keyPoints, transcript);
       
       return {
         keyPoints,
@@ -302,6 +264,23 @@ Focus on creating valuable, original content that expands on the key points whil
       console.error('Error processing transcript:', error);
       throw error;
     }
+  }
+
+  // Template variable replacement helper
+  replaceTemplateVariables(template, variables) {
+    if (!template || typeof template !== 'string') {
+      throw new Error('Template is undefined or not a string. Make sure prompts.js is loaded.');
+    }
+    
+    let result = template;
+    
+    // Replace each variable in the template
+    for (const [key, value] of Object.entries(variables)) {
+      const placeholder = `{${key}}`;
+      result = result.replace(new RegExp(placeholder, 'g'), value || '');
+    }
+    
+    return result;
   }
 
   // Get current model info

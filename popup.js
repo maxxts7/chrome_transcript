@@ -23,7 +23,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   const saveApiKeyBtn = document.getElementById('save-api-key-btn');
   const testApiKeyBtn = document.getElementById('test-api-key-btn');
   const clearApiKeyBtn = document.getElementById('clear-api-key-btn');
-  const articleStyleSelect = document.getElementById('article-style');
   
   // Tab elements
   const tabBtns = document.querySelectorAll('.tab-btn');
@@ -213,8 +212,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         return originalMakeRequest(apiKey, messages, maxTokens, retryCount);
       };
 
-      const articleStyle = articleStyleSelect.value;
-      currentArticle = await anthropicAPI.generateArticle(currentKeyPoints, currentTranscript, articleStyle);
+      currentArticle = await anthropicAPI.generateArticle(currentKeyPoints, currentTranscript);
       displayArticle(currentArticle);
       status.textContent = '✅ Article generated successfully';
       
