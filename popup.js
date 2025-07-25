@@ -1,12 +1,23 @@
 document.addEventListener('DOMContentLoaded', async () => {
+  // Initialize debug logger for popup
+  const logger = new DebugLogger('Popup');
+  logger.info('Popup DOM loaded, initializing components');
+  
   // Initialize components
   const anthropicAPI = new window.AnthropicAPI();
+  const tabManager = new window.TabManager();
+  
+  logger.debug('Components initialized', {
+    hasAnthropicAPI: !!anthropicAPI,
+    hasTabManager: !!tabManager
+  });
   
   // Update version number
   const manifest = chrome.runtime.getManifest();
   const versionElement = document.getElementById('version');
   if (versionElement) {
     versionElement.textContent = `v${manifest.version}`;
+    logger.debug('Version updated', { version: manifest.version });
   }
 
   // DOM elements
@@ -28,6 +39,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const tabBtns = document.querySelectorAll('.tab-btn');
   const tabContents = document.querySelectorAll('.tab-content');
   
+  
   // Transcript tab elements
   const transcriptEmpty = document.getElementById('transcript-empty');
   const transcriptData = document.getElementById('transcript-data');
@@ -46,13 +58,34 @@ document.addEventListener('DOMContentLoaded', async () => {
   const copyArticleBtn = document.getElementById('copy-article-btn');
   const exportArticleBtn = document.getElementById('export-article-btn');
 
-  // State variables
-  let currentTranscript = null;
-  let currentKeyPoints = null;
-  let currentArticle = null;
+  // Current tab state variables
+  let currentTabId = null;
+  let currentTabState = null;
 
   // Initialize on load
+  logger.time('Extension Initialization');
   await initializeExtension();
+  logger.timeEnd('Extension Initialization');
+
+  // Listen for tab updates from background script
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    logger.debug('Received message from background', message);
+    if (message.type === 'TAB_UPDATED' || message.type === 'TAB_REMOVED') {
+      // Refresh current tab context if it affects our current tab
+      if (message.tabId === currentTabId) {
+        logger.debug('Refreshing current tab context due to tab update');
+        initializeCurrentTab();
+      }
+    }
+  });
+
+  // Refresh current tab context when popup becomes visible
+  // This handles cases where user switches tabs while popup is open
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      initializeCurrentTab();
+    }
+  });
 
   // Event Listeners
   extractBtn.addEventListener('click', handleExtractTranscript);
@@ -72,61 +105,321 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   
   // Copy/Export button events
-  copyTranscriptBtn.addEventListener('click', () => copyToClipboard(formatTranscriptAsText(currentTranscript)));
-  exportTranscriptBtn.addEventListener('click', () => exportAsFile(formatTranscriptAsText(currentTranscript), `${sanitizeFileName(currentTranscript?.title || 'transcript')}.txt`));
-  copyKeypointsBtn.addEventListener('click', () => copyToClipboard(currentKeyPoints));
-  exportKeypointsBtn.addEventListener('click', () => exportAsFile(currentKeyPoints, `${sanitizeFileName(currentTranscript?.title || 'keypoints')}_keypoints.txt`));
-  copyArticleBtn.addEventListener('click', () => copyToClipboard(currentArticle));
-  exportArticleBtn.addEventListener('click', () => exportAsFile(currentArticle, `${sanitizeFileName(currentTranscript?.title || 'article')}_article.txt`));
+  copyTranscriptBtn.addEventListener('click', () => copyToClipboard(formatTranscriptAsText(currentTabState?.transcript)));
+  exportTranscriptBtn.addEventListener('click', () => exportAsFile(formatTranscriptAsText(currentTabState?.transcript), `${sanitizeFileName(currentTabState?.transcript?.title || 'transcript')}.txt`));
+  copyKeypointsBtn.addEventListener('click', () => copyToClipboard(currentTabState?.keyPoints));
+  exportKeypointsBtn.addEventListener('click', () => exportAsFile(currentTabState?.keyPoints, `${sanitizeFileName(currentTabState?.transcript?.title || 'keypoints')}_keypoints.txt`));
+  copyArticleBtn.addEventListener('click', () => copyToClipboard(currentTabState?.article));
+  exportArticleBtn.addEventListener('click', () => exportAsFile(currentTabState?.article, `${sanitizeFileName(currentTabState?.transcript?.title || 'article')}_article.txt`));
 
   // Core Functions
   async function initializeExtension() {
+    logger.debug('Starting extension initialization');
+    
     // Load API key and check status
+    logger.time('API Key Status Check');
     await updateApiKeyStatus();
+    logger.timeEnd('API Key Status Check');
     
-    // Load any stored transcript
-    await loadStoredTranscript();
+    // Set up current tab context
+    logger.time('Tab Context Initialization');
+    await initializeCurrentTab();
+    logger.timeEnd('Tab Context Initialization');
     
-    console.log('AI Article Generator popup initialized');
+    logger.info('AI Article Generator popup initialized successfully');
   }
 
+  // Get current active YouTube tab
+  async function getCurrentActiveTab() {
+    try {
+      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (activeTab && tabManager.isYouTubeUrl(activeTab.url)) {
+        return {
+          tabId: activeTab.id,
+          url: activeTab.url,
+          title: activeTab.title || 'YouTube Video'
+        };
+      }
+      return null;
+    } catch (error) {
+      console.error('Error getting current tab:', error);
+      return null;
+    }
+  }
+
+
+  // Initialize current tab state
+  async function initializeCurrentTab() {
+    logger.debug('Initializing current tab');
+    
+    // Try to get current active YouTube tab
+    const activeTab = await getCurrentActiveTab();
+    
+    if (activeTab) {
+      // If we're switching to a different tab, update context
+      if (currentTabId !== activeTab.tabId) {
+        logger.info('Switching to different tab', { 
+          oldTabId: currentTabId, 
+          newTabId: activeTab.tabId, 
+          url: activeTab.url 
+        });
+        
+        const previousTabId = currentTabId;
+        currentTabId = activeTab.tabId;
+        
+        // Initialize tab in storage (this will preserve existing data if same video)
+        const tabState = await tabManager.initializeTab(activeTab.tabId, activeTab.url, activeTab.title);
+        
+        // Load the complete state from storage
+        await loadCurrentTabState();
+        
+        logger.info('Successfully switched to YouTube tab', { 
+          currentTabId, 
+          previousTabId,
+          url: activeTab.url,
+          hasTranscript: !!(currentTabState?.transcript),
+          hasKeyPoints: !!(currentTabState?.keyPoints),  
+          hasArticle: !!(currentTabState?.article)
+        });
+      } else {
+        // Same tab - just refresh the state in case something changed
+        logger.debug('Same tab, refreshing state', { currentTabId });
+        await loadCurrentTabState();
+      }
+    } else {
+      // No active YouTube tab - show appropriate message
+      if (currentTabId !== null) {
+        logger.info('No YouTube tab active, resetting to empty state', { 
+          previousTabId: currentTabId 
+        });
+        
+        currentTabId = null;
+        currentTabState = null;
+        
+        // Reset UI to empty state
+        showTranscriptEmptyState();
+        showKeypointsEmptyState(); 
+        showArticleEmptyState();
+        updateButtonStates();
+        status.textContent = '📺 Open a YouTube video to get started';
+      }
+    }
+  }
+
+  // Load state for the current tab with retry logic
+  async function loadCurrentTabState(retryCount = 0) {
+    if (!currentTabId) {
+      logger.debug('No current tab ID, skipping state load');
+      return;
+    }
+    
+    const maxRetries = 3;
+    logger.debug('Loading tab state', { currentTabId, retryCount });
+    
+    try {
+      // Get the tab state from storage
+      currentTabState = await tabManager.getTabState(currentTabId);
+      
+      // Validate the loaded state
+      if (!currentTabState || typeof currentTabState !== 'object') {
+        throw new Error('Invalid tab state format received');
+      }
+      
+      // Ensure all required properties exist
+      const requiredProps = ['tabId', 'url', 'title', 'transcript', 'keyPoints', 'article'];
+      const missingProps = requiredProps.filter(prop => !(prop in currentTabState));
+      
+      if (missingProps.length > 0) {
+        logger.warn('Tab state missing properties, will fix', { 
+          missingProps, 
+          currentState: currentTabState 
+        });
+        
+        // Fill in missing properties with defaults
+        const defaults = tabManager.createEmptyTabState(currentTabId);
+        currentTabState = { ...defaults, ...currentTabState };
+        
+        // Save the corrected state
+        await tabManager.saveTabState(currentTabId, currentTabState);
+      }
+      
+      // Update UI with current tab state
+      await updateUIForCurrentTab();
+      
+      logger.info('Successfully loaded tab state', { 
+        currentTabId,
+        hasTranscript: !!currentTabState.transcript,
+        hasKeyPoints: !!currentTabState.keyPoints,
+        hasArticle: !!currentTabState.article,
+        url: currentTabState.url
+      });
+      
+    } catch (error) {
+      logger.error('Error loading tab state', { error, currentTabId, retryCount });
+      
+      if (retryCount < maxRetries) {
+        // Retry with exponential backoff
+        const delay = Math.pow(2, retryCount) * 500; // 500ms, 1s, 2s
+        logger.info(`Retrying state load in ${delay}ms`, { retryCount: retryCount + 1 });
+        
+        setTimeout(() => {
+          loadCurrentTabState(retryCount + 1);
+        }, delay);
+        return;
+      }
+      
+      // Final fallback - create empty state
+      logger.warn('All retries failed, creating empty state', { currentTabId });
+      currentTabState = tabManager.createEmptyTabState(currentTabId);
+      
+      try {
+        // Try to save the empty state
+        await tabManager.saveTabState(currentTabId, currentTabState);
+        await updateUIForCurrentTab();
+      } catch (saveError) {
+        logger.error('Failed to save empty state fallback', saveError);
+        // Still update UI to show empty state
+        await updateUIForCurrentTab();
+      }
+    }
+  }
+
+  // Update UI to reflect current tab state with comprehensive logging
+  async function updateUIForCurrentTab() {
+    if (!currentTabState) {
+      logger.warn('updateUIForCurrentTab called with no currentTabState');
+      return;
+    }
+
+    logger.debug('Updating UI for current tab state', {
+      tabId: currentTabState.tabId,
+      hasTranscript: !!currentTabState.transcript,
+      hasKeyPoints: !!currentTabState.keyPoints,
+      hasArticle: !!currentTabState.article,
+      isProcessing: currentTabState.isProcessing,
+      processingStep: currentTabState.processingStep,
+      hasError: !!currentTabState.error
+    });
+
+    // Update transcript UI
+    if (currentTabState.transcript) {
+      logger.debug('Displaying transcript UI', { 
+        segments: currentTabState.transcript.segments?.length || 0 
+      });
+      displayTranscript(currentTabState.transcript);
+      if (!currentTabState.isProcessing) {
+        status.textContent = `📋 ${currentTabState.transcript.segments.length} segments loaded`;
+      }
+    } else {
+      logger.debug('Showing transcript empty state');
+      showTranscriptEmptyState();
+      if (!currentTabState.isProcessing) {
+        status.textContent = 'Ready to extract transcript';
+      }
+    }
+
+    // Update key points UI
+    if (currentTabState.keyPoints) {
+      logger.debug('Displaying key points UI', { 
+        keyPointsLength: currentTabState.keyPoints.length 
+      });
+      displayKeyPoints(currentTabState.keyPoints);
+    } else {
+      logger.debug('Showing key points empty state');
+      showKeypointsEmptyState();
+    }
+
+    // Update article UI
+    if (currentTabState.article) {
+      logger.debug('Displaying article UI', { 
+        articleLength: currentTabState.article.length 
+      });
+      displayArticle(currentTabState.article);
+    } else {
+      logger.debug('Showing article empty state');
+      showArticleEmptyState();
+    }
+
+    // Update button states
+    logger.debug('Updating button states');
+    updateButtonStates();
+
+    // Show processing status if in progress
+    if (currentTabState.isProcessing) {
+      const stepText = currentTabState.processingStep || 'processing';
+      status.textContent = `🔄 ${stepText}...`;
+      logger.debug('Showing processing status', { stepText });
+    }
+
+    // Show error status if there's an error
+    if (currentTabState.error && !currentTabState.isProcessing) {
+      status.textContent = `❌ ${currentTabState.error}`;
+      logger.warn('Showing error status', { error: currentTabState.error });
+    }
+
+    logger.debug('UI update completed successfully');
+  }
+
+
   async function handleExtractTranscript() {
+    logger.info('Starting transcript extraction', { currentTabId });
+    
+    if (!currentTabId) {
+      const errorMsg = '❌ Open a YouTube video first';
+      status.textContent = errorMsg;
+      logger.warn('Transcript extraction failed: no active YouTube tab');
+      return;
+    }
+
     extractBtn.disabled = true;
     extractBtn.textContent = 'Extracting...';
     status.textContent = 'Extracting transcript from page...';
+    
+    logger.time('Transcript Extraction');
+
+    // Mark tab as processing
+    await tabManager.setProcessingStatus(currentTabId, true, 'extracting transcript');
 
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      
-      if (!tab.url.includes('youtube.com')) {
-        status.textContent = '❌ Please navigate to a YouTube video';
-        resetExtractButton();
-        return;
-      }
-
-      const response = await chrome.tabs.sendMessage(tab.id, { type: 'EXTRACT_TRANSCRIPT' });
+      // Use the current tab ID instead of querying for active tab
+      const response = await chrome.tabs.sendMessage(currentTabId, { type: 'EXTRACT_TRANSCRIPT' });
       
       if (response?.transcript && response.transcript.length > 0) {
-        currentTranscript = {
+        const transcript = {
           url: response.url,
           timestamp: new Date().toISOString(),
           segments: response.transcript,
-          title: await getVideoTitle(tab)
+          title: await getVideoTitle({ id: currentTabId }) || 'YouTube Video'
         };
         
-        displayTranscript(currentTranscript);
+        // Save transcript to current tab state
+        await tabManager.updateTabState(currentTabId, {
+          transcript: transcript,
+          isProcessing: false,
+          processingStep: null
+        });
+
+        // Update UI
+        currentTabState.transcript = transcript;
+        displayTranscript(transcript);
         status.textContent = `✅ Extracted ${response.transcript.length} segments`;
+        logger.info('Transcript extraction completed', { 
+          segments: response.transcript.length,
+          title: transcript.title
+        });
         
         // Enable AI buttons if API key is available
         updateButtonStates();
         
       } else {
         status.textContent = '❌ No transcript found - try enabling captions first';
+        await tabManager.setProcessingStatus(currentTabId, false);
         showTranscriptEmptyState();
       }
     } catch (error) {
       console.error('Error extracting transcript:', error);
       status.textContent = '❌ Error extracting transcript - reload the page and try again';
+      await tabManager.setError(currentTabId, error.message);
       showTranscriptEmptyState();
     }
 
@@ -134,13 +427,23 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   async function handleExtractKeyPoints() {
-    if (!currentTranscript) {
-      status.textContent = '❌ No transcript available';
+    logger.info('Starting key points extraction', { 
+      hasCurrentTab: !!currentTabId,
+      hasTranscript: !!(currentTabState?.transcript),
+      hasApiKey: !!anthropicAPI.apiKey
+    });
+    
+    if (!currentTabId || !currentTabState?.transcript) {
+      const errorMsg = '❌ No transcript available';
+      status.textContent = errorMsg;
+      logger.warn('Key points extraction failed: no transcript available');
       return;
     }
 
     if (!anthropicAPI.apiKey) {
-      status.textContent = '❌ Please configure your Anthropic API key first';
+      const errorMsg = '❌ Please configure your Anthropic API key first';
+      status.textContent = errorMsg;
+      logger.warn('Key points extraction failed: no API key configured');
       switchTab('transcript');
       toggleSettingsPanel();
       return;
@@ -149,6 +452,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     extractPointsBtn.disabled = true;
     extractPointsBtn.innerHTML = '<div class="loading"><div class="loading-spinner"></div>Extracting Points...</div>';
     status.textContent = '🧠 AI is analyzing the transcript...';
+
+    // Mark tab as processing
+    await tabManager.setProcessingStatus(currentTabId, true, 'extracting key points');
+    logger.time('Key Points Extraction API Call');
 
     try {
       // Monitor for retry attempts
@@ -160,9 +467,21 @@ document.addEventListener('DOMContentLoaded', async () => {
         return originalMakeRequest(apiKey, messages, maxTokens, retryCount);
       };
 
-      currentKeyPoints = await anthropicAPI.extractKeyPoints(currentTranscript);
-      displayKeyPoints(currentKeyPoints);
+      const keyPoints = await anthropicAPI.extractKeyPoints(currentTabState.transcript);
+      
+      // Save key points to current tab state
+      await tabManager.updateTabState(currentTabId, {
+        keyPoints: keyPoints,
+        isProcessing: false,
+        processingStep: null
+      });
+
+      // Update UI
+      currentTabState.keyPoints = keyPoints;
+      displayKeyPoints(keyPoints);
       status.textContent = '✅ Key points extracted successfully';
+      logger.timeEnd('Key Points Extraction API Call');
+      logger.info('Key points extraction completed successfully');
       
       // Switch to key points tab and enable generate article button
       switchTab('keypoints');
@@ -180,6 +499,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       
       status.textContent = statusMessage;
+      await tabManager.setError(currentTabId, error.message);
       showKeypointsEmptyState();
     }
 
@@ -188,7 +508,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   async function handleGenerateArticle() {
-    if (!currentKeyPoints || !currentTranscript) {
+    if (!currentTabId || !currentTabState?.keyPoints || !currentTabState?.transcript) {
       status.textContent = '❌ Please extract key points first';
       return;
     }
@@ -202,6 +522,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     generateArticleBtn.innerHTML = '<div class="loading"><div class="loading-spinner"></div>Generating Article...</div>';
     status.textContent = '📝 AI is writing your article...';
 
+    // Mark tab as processing
+    await tabManager.setProcessingStatus(currentTabId, true, 'generating article');
+
     try {
       // Monitor for retry attempts
       const originalMakeRequest = anthropicAPI.makeRequest.bind(anthropicAPI);
@@ -212,8 +535,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         return originalMakeRequest(apiKey, messages, maxTokens, retryCount);
       };
 
-      currentArticle = await anthropicAPI.generateArticle(currentKeyPoints, currentTranscript);
-      displayArticle(currentArticle);
+      const article = await anthropicAPI.generateArticle(currentTabState.keyPoints, currentTabState.transcript);
+      
+      // Save article to current tab state
+      await tabManager.updateTabState(currentTabId, {
+        article: article,
+        isProcessing: false,
+        processingStep: null
+      });
+
+      // Update UI
+      currentTabState.article = article;
+      displayArticle(article);
       status.textContent = '✅ Article generated successfully';
       
       // Switch to article tab
@@ -231,6 +564,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       
       status.textContent = statusMessage;
+      await tabManager.setError(currentTabId, error.message);
       showArticleEmptyState();
     }
 
@@ -345,9 +679,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function updateButtonStates() {
-    const hasTranscript = !!currentTranscript;
+    const hasTranscript = !!(currentTabState?.transcript);
     const hasApiKey = !!anthropicAPI.apiKey;
-    const hasKeyPoints = !!currentKeyPoints;
+    const hasKeyPoints = !!(currentTabState?.keyPoints);
+    const hasArticle = !!(currentTabState?.article);
 
     // Transcript buttons
     copyTranscriptBtn.disabled = !hasTranscript;
@@ -362,8 +697,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     exportKeypointsBtn.disabled = !hasKeyPoints;
 
     // Article buttons
-    copyArticleBtn.disabled = !currentArticle;
-    exportArticleBtn.disabled = !currentArticle;
+    copyArticleBtn.disabled = !hasArticle;
+    exportArticleBtn.disabled = !hasArticle;
   }
 
   // Display Functions
@@ -445,23 +780,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // Utility Functions
-  async function loadStoredTranscript() {
-    try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tab) {
-        const response = await chrome.tabs.sendMessage(tab.id, { type: 'GET_STORED_TRANSCRIPT' });
-        if (response?.transcript) {
-          currentTranscript = response.transcript;
-          currentTranscript.title = await getVideoTitle(tab);
-          displayTranscript(currentTranscript);
-          status.textContent = `📋 Loaded ${currentTranscript.segments.length} segments`;
-          updateButtonStates();
-        }
-      }
-    } catch (error) {
-      console.log('No stored transcript available');
-    }
-  }
+  // Note: loadStoredTranscript is now handled by the tab manager system
 
   async function getVideoTitle(tab) {
     try {

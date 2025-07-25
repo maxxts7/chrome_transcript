@@ -6,12 +6,14 @@
   "permissions": [
     "activeTab",
     "scripting",
-    "storage"
+    "storage",
+    "tabs",
+    "alarms"
   ],
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "js": ["debug-utils.js", "content.js"],
       "run_at": "document_start"
     }
   ],

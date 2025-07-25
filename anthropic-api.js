@@ -6,6 +6,25 @@ class AnthropicAPI {
     this.model = 'claude-3-5-sonnet-20241022';
     this.maxTokens = 4000;
     
+    // Initialize logger
+    if (typeof DebugLogger !== 'undefined') {
+      this.logger = new DebugLogger('AnthropicAPI');
+      this.logger.info('AnthropicAPI initialized', {
+        model: this.model,
+        maxTokens: this.maxTokens,
+        baseURL: this.baseURL
+      });
+    } else {
+      this.logger = {
+        info: (msg, data) => console.log(`[AnthropicAPI] ${msg}`, data),
+        debug: (msg, data) => console.log(`[AnthropicAPI DEBUG] ${msg}`, data),
+        warn: (msg, data) => console.warn(`[AnthropicAPI WARN] ${msg}`, data),
+        error: (msg, error) => console.error(`[AnthropicAPI ERROR] ${msg}`, error),
+        time: (label) => console.time(`[AnthropicAPI] ${label}`),
+        timeEnd: (label) => console.timeEnd(`[AnthropicAPI] ${label}`)
+      };
+    }
+    
     // Load API key from storage
     this.loadApiKey();
   }
@@ -15,8 +34,9 @@ class AnthropicAPI {
     try {
       const result = await chrome.storage.local.get(['anthropic_api_key']);
       this.apiKey = result.anthropic_api_key || null;
+      this.logger.debug('API key loaded', { hasKey: !!this.apiKey });
     } catch (error) {
-      console.error('Error loading API key:', error);
+      this.logger.error('Error loading API key', error);
     }
   }
 
@@ -84,7 +104,14 @@ class AnthropicAPI {
 
   // Make API request to Claude with retry logic
   async makeRequest(apiKey, messages, maxTokens = null, retryCount = 0) {
+    this.logger.debug('Making API request', {
+      messageCount: messages.length,
+      maxTokens: maxTokens || this.maxTokens,
+      retryCount
+    });
+    
     if (!this.isValidApiKey(apiKey)) {
+      this.logger.error('Invalid API key provided to makeRequest');
       throw new Error('Invalid API key');
     }
 
@@ -170,11 +197,18 @@ class AnthropicAPI {
 
   // Extract key points from transcript
   async extractKeyPoints(transcript) {
+    this.logger.info('Starting key points extraction', {
+      hasApiKey: !!this.apiKey,
+      segmentCount: transcript?.segments?.length || 0
+    });
+    
     if (!this.apiKey) {
+      this.logger.error('API key not configured for key points extraction');
       throw new Error('API key not configured');
     }
 
     if (!transcript || !transcript.segments || transcript.segments.length === 0) {
+      this.logger.error('No transcript data provided for key points extraction');
       throw new Error('No transcript data provided');
     }
 
@@ -200,21 +234,36 @@ class AnthropicAPI {
     ];
 
     try {
+      this.logger.time('Key Points API Request');
       const response = await this.makeRequest(this.apiKey, messages);
-      return response.content[0]?.text || 'No key points extracted';
+      this.logger.timeEnd('Key Points API Request');
+      
+      const result = response.content[0]?.text || 'No key points extracted';
+      this.logger.info('Key points extraction completed', {
+        responseLength: result.length
+      });
+      return result;
     } catch (error) {
-      console.error('Error extracting key points:', error);
+      this.logger.error('Error extracting key points', error);
       throw error;
     }
   }
 
   // Generate article from key points
   async generateArticle(keyPoints, transcript) {
+    this.logger.info('Starting article generation', {
+      hasApiKey: !!this.apiKey,
+      keyPointsLength: keyPoints?.length || 0,
+      segmentCount: transcript?.segments?.length || 0
+    });
+    
     if (!this.apiKey) {
+      this.logger.error('API key not configured for article generation');
       throw new Error('API key not configured');
     }
 
     if (!keyPoints || !transcript) {
+      this.logger.error('Key points and transcript data required for article generation');
       throw new Error('Key points and transcript data required');
     }
 
@@ -238,10 +287,17 @@ class AnthropicAPI {
     ];
 
     try {
+      this.logger.time('Article Generation API Request');
       const response = await this.makeRequest(this.apiKey, messages, 4000);
-      return response.content[0]?.text || 'No article generated';
+      this.logger.timeEnd('Article Generation API Request');
+      
+      const result = response.content[0]?.text || 'No article generated';
+      this.logger.info('Article generation completed', {
+        responseLength: result.length
+      });
+      return result;
     } catch (error) {
-      console.error('Error generating article:', error);
+      this.logger.error('Error generating article', error);
       throw error;
     }
   }

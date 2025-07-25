@@ -1,14 +1,40 @@
 (function() {
   'use strict';
 
-
-  // Debug logging helper
-  function debugLog(message, data = null) {
-    const timestamp = new Date().toISOString().slice(11, 23);
-    if (data) {
-      console.log(`🔍 [${timestamp}] ${message}`, data);
+  // Initialize debug logger for content script
+  let logger = null;
+  
+  function initializeContentLogger() {
+    if (typeof DebugLogger !== 'undefined') {
+      logger = new DebugLogger('ContentScript');
+      logger.info('Content script logger initialized', { url: window.location.href });
     } else {
-      console.log(`🔍 [${timestamp}] ${message}`);
+      // Fallback to simple logging
+      logger = {
+        info: (msg, data) => console.log(`🔍 [Content] ${msg}`, data),
+        debug: (msg, data) => console.log(`🔍 [Content DEBUG] ${msg}`, data),
+        warn: (msg, data) => console.warn(`🔍 [Content WARN] ${msg}`, data),
+        error: (msg, error) => console.error(`🔍 [Content ERROR] ${msg}`, error),
+        time: (label) => console.time(`⏱️ [Content] ${label}`),
+        timeEnd: (label) => console.timeEnd(`⏱️ [Content] ${label}`)
+      };
+    }
+  }
+
+  // Initialize logger
+  initializeContentLogger();
+
+  // Legacy debug logging helper for compatibility
+  function debugLog(message, data = null) {
+    if (logger) {
+      logger.debug(message, data);
+    } else {
+      const timestamp = new Date().toISOString().slice(11, 23);
+      if (data) {
+        console.log(`🔍 [${timestamp}] ${message}`, data);
+      } else {
+        console.log(`🔍 [${timestamp}] ${message}`);
+      }
     }
   }
 
