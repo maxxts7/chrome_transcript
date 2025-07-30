@@ -39,7 +39,15 @@ class TabManager {
   // Get specific tab state
   async getTabState(tabId) {
     const allTabs = await this.getAllTabs();
-    return allTabs[tabId] || this.createEmptyTabState(tabId);
+    const tabIdStr = tabId.toString(); // Ensure consistent string key
+    this.logger.debug('Looking for tab state', { 
+      tabId, 
+      tabIdStr, 
+      availableTabIds: Object.keys(allTabs),
+      foundDirectly: !!allTabs[tabId],
+      foundAsString: !!allTabs[tabIdStr]
+    });
+    return allTabs[tabIdStr] || allTabs[tabId] || this.createEmptyTabState(tabId);
   }
 
   // Save tab state
@@ -48,11 +56,12 @@ class TabManager {
     
     try {
       const allTabs = await this.getAllTabs();
+      const tabIdStr = tabId.toString(); // Ensure consistent string key
       
-      // Update the specific tab
-      allTabs[tabId] = {
+      // Update the specific tab using string key
+      allTabs[tabIdStr] = {
         ...tabState,
-        tabId: tabId,
+        tabId: parseInt(tabId), // Store tabId as number in the state object
         lastUpdated: Date.now()
       };
 
@@ -87,7 +96,9 @@ class TabManager {
   async removeTab(tabId) {
     try {
       const allTabs = await this.getAllTabs();
-      delete allTabs[tabId];
+      const tabIdStr = tabId.toString(); // Ensure consistent string key
+      delete allTabs[tabIdStr];
+      delete allTabs[tabId]; // Remove both versions just in case
       
       await chrome.storage.local.set({
         [this.storageKey]: allTabs

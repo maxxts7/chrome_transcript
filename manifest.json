@@ -13,7 +13,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["debug-utils.js", "content.js"],
+      "js": ["debug-utils.js", "selectors.js", "error-handler.js", "content.js"],
       "run_at": "document_start"
     }
   ],

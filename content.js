@@ -43,14 +43,7 @@
     debugLog('🔓 Attempting to open transcript panel...');
     
     // Method 1: Look for the "Show transcript" button in video description area
-    const showTranscriptButtons = [
-      'button[aria-label*="transcript" i]',
-      'button[aria-label*="Show transcript" i]',
-      '[role="button"][aria-label*="transcript" i]',
-      'yt-button-renderer[aria-label*="transcript" i]'
-    ];
-    
-    for (const selector of showTranscriptButtons) {
+    for (const selector of YouTubeSelectors.transcriptButtons) {
       const button = document.querySelector(selector);
       if (button) {
         debugLog(`  ✅ Found transcript button with selector: ${selector}`);
@@ -63,21 +56,15 @@
     }
     
     // Method 2: Look for the three-dots menu and try to open transcript
-    const moreActionsButton = document.querySelector('button[aria-label*="More actions" i], button[aria-label*="Show more" i]');
+    const moreActionsButton = document.querySelector(YouTubeSelectors.moreActionsButtons.join(', '));
     if (moreActionsButton) {
       debugLog('  🔍 Found "More actions" button, clicking...');
       moreActionsButton.click();
       
       // Wait a bit for menu to open, then look for transcript option
       setTimeout(() => {
-        const transcriptMenuItems = [
-          'yt-formatted-string:contains("Show transcript")',
-          '[role="menuitem"]:contains("transcript")',
-          'tp-yt-paper-listbox [role="option"]:contains("transcript")'
-        ];
-        
         // Since :contains() doesn't work in querySelectorAll, we'll check text content
-        const menuItems = document.querySelectorAll('[role="menuitem"], [role="option"], yt-formatted-string');
+        const menuItems = document.querySelectorAll(YouTubeSelectors.menuItems.join(', '));
         for (const item of menuItems) {
           if (item.textContent.toLowerCase().includes('transcript')) {
             debugLog('  ✅ Found transcript menu item, clicking...');
@@ -90,7 +77,7 @@
     }
     
     // Method 3: Look for transcript toggle in video player controls
-    const playerTranscriptButton = document.querySelector('.ytp-transcript-button, .ytp-cc-button[aria-pressed="true"]');
+    const playerTranscriptButton = document.querySelector(`${YouTubeSelectors.playerControls.transcriptButton}, ${YouTubeSelectors.playerControls.ccButton}`);
     if (playerTranscriptButton) {
       debugLog('  ✅ Found player transcript button');
       playerTranscriptButton.click();
@@ -108,9 +95,7 @@
       const checkInterval = 200;
       
       const checkForTranscript = () => {
-        const transcriptElements = document.querySelectorAll(
-          'ytd-transcript-segment-renderer, .ytd-transcript-segment-renderer, [class*="transcript-segment"]'
-        );
+        const transcriptElements = document.querySelectorAll(YouTubeSelectors.transcriptPanel.join(', '));
         
         if (transcriptElements.length > 0) {
           debugLog(`  ✅ Transcript panel loaded with ${transcriptElements.length} segments`);
@@ -136,20 +121,17 @@
     let rejectedShort = 0;
     
     transcriptItems.forEach((item, index) => {
-      const timeSelectors = ['.segment-timestamp', '[class*="timestamp"]', '.ytd-transcript-segment-renderer .timestamp'];
-      const textSelectors = ['.segment-text', '[class*="segment-text"]', '.ytd-transcript-segment-renderer .text'];
-      
       let timeElement = null;
       let textElement = null;
       
       // Find timestamp element
-      for (const sel of timeSelectors) {
+      for (const sel of YouTubeSelectors.transcriptSegments.timestamp) {
         timeElement = item.querySelector(sel);
         if (timeElement) break;
       }
       
       // Find text element
-      for (const sel of textSelectors) {
+      for (const sel of YouTubeSelectors.transcriptSegments.text) {
         textElement = item.querySelector(sel);
         if (textElement) break;
       }
@@ -180,15 +162,9 @@
     
     // Method 2: Try captions/subtitles if available
     debugLog('🎯 Method 2: Caption segments');
-    const captionSelectors = [
-      '.ytp-caption-segment',
-      '.captions-text',
-      '[class*="caption"]',
-      '.ytp-caption-window-container [class*="segment"]'
-    ];
     
     let captionElements = [];
-    for (const selector of captionSelectors) {
+    for (const selector of YouTubeSelectors.captions) {
       const elements = document.querySelectorAll(selector);
       debugLog(`  → Trying selector: '${selector}' - found ${elements.length} elements`);
       if (elements.length > 0) {
@@ -222,16 +198,9 @@
     
     // Method 3: Try any text content that looks like transcript
     debugLog('🎯 Method 3: General transcript elements');
-    const generalSelectors = [
-      '[class*="transcript"] p',
-      '[id*="transcript"] p',
-      '.transcript-text',
-      '[data-transcript]',
-      '.video-transcript p'
-    ];
     
     let possibleElements = [];
-    for (const selector of generalSelectors) {
+    for (const selector of YouTubeSelectors.generalTranscript) {
       const elements = document.querySelectorAll(selector);
       debugLog(`  → Trying selector: '${selector}' - found ${elements.length} elements`);
       if (elements.length > 0) {
@@ -261,86 +230,79 @@
     return transcript;
   }
 
-  // Main transcript extraction functionality with debug logging
-  async function extractTranscript() {
-    const transcript = [];
-    const startTime = performance.now();
-    
-    debugLog('TRANSCRIPT DEBUG - Starting extraction...');
-    debugLog('Page URL:', window.location.href);
-    debugLog('Page load state:', document.readyState);
-    debugLog('DOM elements count:', document.querySelectorAll('*').length);
-    
-    // Check if we're on YouTube
+  // Focused functions for transcript extraction (Single Responsibility Principle)
+  
+  // Function to validate if we're on a supported platform
+  function validatePlatform() {
     if (!window.location.hostname.includes('youtube.com')) {
       debugLog('❌ Not on YouTube domain');
-      return transcript;
+      return false;
     }
+    return true;
+  }
+
+  // Function to detect existing transcript elements on the page
+  function detectTranscriptElements() {
+    debugLog('🎯 Detecting transcript elements...');
     
-    // Method 1: Try YouTube's transcript panel (attempt to open if not found)
-    debugLog('🎯 Method 1: YouTube transcript panel');
-    const transcriptSelectors = [
-      'ytd-transcript-segment-renderer',
-      '.ytd-transcript-segment-renderer',
-      '[class*="transcript-segment"]',
-      'ytd-transcript-body-renderer [class*="segment"]',
-      'ytd-transcript-renderer [class*="segment"]'
-    ];
-    
-    let transcriptItems = null;
-    for (const selector of transcriptSelectors) {
+    for (const selector of YouTubeSelectors.transcriptPanel) {
       const elements = document.querySelectorAll(selector);
       debugLog(`  → Trying selector: '${selector}' - found ${elements.length} elements`);
       if (elements.length > 0) {
-        transcriptItems = elements;
         debugLog(`  ✅ Using selector: '${selector}'`);
+        return elements;
+      }
+    }
+    
+    debugLog('  ❌ No transcript elements found');
+    return null;
+  }
+
+  // Function to attempt opening transcript panel and wait for elements
+  async function attemptTranscriptPanelOpening() {
+    debugLog('  🚪 Attempting to open transcript panel...');
+    
+    const opened = openTranscriptPanel();
+    if (!opened) {
+      debugLog('  ❌ Could not open transcript panel');
+      return null;
+    }
+    
+    debugLog('  ⏳ Waiting for transcript panel to load...');
+    const loadedElements = await waitForTranscriptPanel();
+    
+    if (loadedElements && loadedElements.length > 0) {
+      debugLog('  ✅ Transcript panel loaded successfully');
+      return loadedElements;
+    } else {
+      debugLog('  ❌ Transcript panel failed to load');
+      return null;
+    }
+  }
+
+  // Function to get video metadata for debugging
+  function getVideoMetadata() {
+    // Try each title selector until we find one
+    let title = 'Unknown';
+    for (const selector of YouTubeSelectors.videoInfo.title) {
+      const element = document.querySelector(selector);
+      if (element) {
+        title = element.textContent?.trim() || 'Unknown';
         break;
       }
     }
     
-    // If no transcript panel found, try to open it
-    if (!transcriptItems || transcriptItems.length === 0) {
-      debugLog('  🚪 No transcript panel found, attempting to open it...');
-      const opened = openTranscriptPanel();
-      
-      if (opened) {
-        debugLog('  ⏳ Waiting for transcript panel to load...');
-        // Wait for transcript panel to load and try again
-        return new Promise(async (resolve) => {
-          const loadedElements = await waitForTranscriptPanel();
-          if (loadedElements && loadedElements.length > 0) {
-            // Recursively call extractTranscript to process the loaded elements
-            debugLog('  🔄 Retrying extraction with loaded transcript panel...');
-            const result = await extractTranscriptSync(loadedElements);
-            resolve(result);
-          } else {
-            debugLog('  ❌ Transcript panel failed to load, continuing with other methods...');
-            resolve(await extractTranscriptFallback());
-          }
-        });
-      }
-    }
-    
-    // Process transcript items if found
-    if (transcriptItems && transcriptItems.length > 0) {
-      const extractedTranscript = extractTranscriptSync(transcriptItems);
-      transcript.push(...extractedTranscript);
-    } else {
-      // If no transcript panel items, use fallback methods
-      const fallbackTranscript = extractTranscriptFallback();
-      transcript.push(...fallbackTranscript);
-    }
-    
-    // Additional debugging info
-    const endTime = performance.now();
-    const duration = (endTime - startTime).toFixed(2);
-    
+    return {
+      title: title,
+      hasCC: !!document.querySelector(YouTubeSelectors.playerControls.subtitlesButton),
+      playerState: document.querySelector(YouTubeSelectors.playerControls.player)?.className || 'Unknown'
+    };
+  }
+
+  // Function to log extraction results and provide troubleshooting
+  function logExtractionResults(transcript, duration) {
     debugLog(`⏱️ Extraction completed in ${duration}ms`);
-    debugLog(`🎬 Video info:`, {
-      title: document.querySelector('h1.ytd-watch-metadata yt-formatted-string, h1.title, .watch-title')?.textContent?.trim() || 'Unknown',
-      hasCC: !!document.querySelector('.ytp-subtitles-button[aria-pressed="true"]'),
-      playerState: document.querySelector('.html5-video-player')?.className || 'Unknown'
-    });
+    debugLog(`🎬 Video info:`, getVideoMetadata());
     
     if (transcript.length === 0) {
       debugLog('❌ No transcript segments found with any method');
@@ -352,6 +314,43 @@
     } else {
       debugLog(`✅ Successfully extracted ${transcript.length} transcript segments`);
     }
+  }
+
+  // Main transcript extraction functionality (refactored to use focused functions)
+  async function extractTranscript() {
+    const startTime = performance.now();
+    
+    debugLog('TRANSCRIPT DEBUG - Starting extraction...');
+    debugLog('Page URL:', window.location.href);
+    debugLog('Page load state:', document.readyState);
+    debugLog('DOM elements count:', document.querySelectorAll(YouTubeSelectors.common.allElements).length);
+    
+    // Validate platform
+    if (!validatePlatform()) {
+      return [];
+    }
+    
+    // Try to find existing transcript elements
+    let transcriptItems = detectTranscriptElements();
+    
+    // If no elements found, try to open transcript panel
+    if (!transcriptItems) {
+      transcriptItems = await attemptTranscriptPanelOpening();
+    }
+    
+    // Extract transcript data
+    let transcript = [];
+    if (transcriptItems && transcriptItems.length > 0) {
+      transcript = extractTranscriptSync(transcriptItems);
+    } else {
+      // Use fallback methods if main extraction failed
+      transcript = extractTranscriptFallback();
+    }
+    
+    // Log results and performance
+    const endTime = performance.now();
+    const duration = (endTime - startTime).toFixed(2);
+    logExtractionResults(transcript, duration);
     
     return transcript;
   }
@@ -415,21 +414,55 @@
 
   // Listen for messages from popup
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    debugLog('📨 Message received from popup:', message);
+    // logger.info('Content script message received', {
+    //   messageType: message?.type,
+    //   messageId: message?.messageId
+    // });
     
     if (message.type === 'EXTRACT_TRANSCRIPT') {
-      debugLog('🎯 Processing EXTRACT_TRANSCRIPT request');
+      // logger.info('Processing EXTRACT_TRANSCRIPT request', {
+      //   messageId: message.messageId,
+      //   isYouTube: window.location.hostname.includes('youtube.com')
+      // });
       
       // Handle async extraction
       (async () => {
         try {
           const transcript = await logTranscript();
-          const response = { transcript, url: window.location.href };
-          debugLog('📤 Sending response:', response);
+          
+          // logger.info('Transcript extraction completed', {
+          //   transcriptLength: transcript?.length || 0
+          // });
+
+          const response = { 
+            transcript, 
+            url: window.location.href,
+            extractedAt: new Date().toISOString(),
+            messageId: message.messageId
+          };
+          
+          // logger.info('Sending transcript response', {
+          //   transcriptLength: response.transcript?.length || 0,
+          //   url: response.url
+          // });
+          
           sendResponse(response);
+          
         } catch (error) {
-          debugLog('❌ Error during transcript extraction:', error);
-          sendResponse({ transcript: null, url: window.location.href, error: error.message });
+          logger.error('Content script extraction error', {
+            error: error.message,
+            messageId: message.messageId
+          });
+
+          const errorResponse = { 
+            transcript: null, 
+            url: window.location.href, 
+            error: error.message,
+            messageId: message.messageId,
+            errorAt: new Date().toISOString()
+          };
+          
+          sendResponse(errorResponse);
         }
       })();
       
@@ -437,18 +470,22 @@
       return true;
       
     } else if (message.type === 'GET_STORED_TRANSCRIPT') {
-      debugLog('📋 Processing GET_STORED_TRANSCRIPT request');
       try {
         const stored = sessionStorage.getItem('extractedTranscript');
         const parsedTranscript = stored ? JSON.parse(stored) : null;
-        debugLog('📤 Sending stored transcript:', parsedTranscript);
         sendResponse({ transcript: parsedTranscript });
       } catch (e) {
-        debugLog('❌ Error retrieving stored transcript:', e);
+        logger.error('Error retrieving stored transcript', { error: e.message });
         sendResponse({ transcript: null });
       }
+    } else if (message.type === 'PING') {
+      sendResponse({ 
+        pong: true, 
+        timestamp: Date.now(),
+        url: window.location.href
+      });
     } else {
-      debugLog('❓ Unknown message type:', message.type);
+      logger.warn('Unknown message type', { messageType: message.type });
     }
   });
 

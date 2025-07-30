@@ -66,6 +66,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   logger.time('Extension Initialization');
   await initializeExtension();
   logger.timeEnd('Extension Initialization');
+  
+  // Ensure correct tab is shown after initialization
+  if (currentTabState?.transcript) {
+    logger.debug('Transcript found during initialization, ensuring transcript tab is active');
+    switchTab('transcript');
+  }
 
   // Listen for tab updates from background script
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -81,9 +87,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Refresh current tab context when popup becomes visible
   // This handles cases where user switches tabs while popup is open
-  document.addEventListener('visibilitychange', () => {
+  document.addEventListener('visibilitychange', async () => {
     if (!document.hidden) {
-      initializeCurrentTab();
+      logger.debug('Popup became visible, refreshing tab context');
+      await initializeCurrentTab();
     }
   });
 
@@ -185,6 +192,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Same tab - just refresh the state in case something changed
         logger.debug('Same tab, refreshing state', { currentTabId });
         await loadCurrentTabState();
+        
+        // Force UI update even for same tab to handle visibility changes
+        if (currentTabState) {
+          logger.debug('Forcing UI refresh for same tab');
+          await updateUIForCurrentTab();
+        }
       }
     } else {
       // No active YouTube tab - show appropriate message
@@ -225,19 +238,22 @@ document.addEventListener('DOMContentLoaded', async () => {
         throw new Error('Invalid tab state format received');
       }
       
-      // Ensure all required properties exist
-      const requiredProps = ['tabId', 'url', 'title', 'transcript', 'keyPoints', 'article'];
-      const missingProps = requiredProps.filter(prop => !(prop in currentTabState));
+      // Ensure all required properties exist - but preserve existing data
+      const requiredProps = ['tabId', 'url', 'title'];
+      const missingCriticalProps = requiredProps.filter(prop => !(prop in currentTabState) || currentTabState[prop] === undefined);
       
-      if (missingProps.length > 0) {
-        logger.warn('Tab state missing properties, will fix', { 
-          missingProps, 
+      if (missingCriticalProps.length > 0) {
+        logger.warn('Tab state missing critical properties, will fix', { 
+          missingCriticalProps, 
           currentState: currentTabState 
         });
         
-        // Fill in missing properties with defaults
+        // Only fill in missing critical properties - preserve transcript/keyPoints/article data
         const defaults = tabManager.createEmptyTabState(currentTabId);
-        currentTabState = { ...defaults, ...currentTabState };
+        currentTabState = { 
+          ...defaults, 
+          ...currentTabState  // This preserves existing transcript, keyPoints, article data
+        };
         
         // Save the corrected state
         await tabManager.saveTabState(currentTabId, currentTabState);
@@ -245,6 +261,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       
       // Update UI with current tab state
       await updateUIForCurrentTab();
+      
+      // Force switch to transcript tab if we have transcript data but it's not showing
+      if (currentTabState.transcript && transcriptEmpty.style.display !== 'none') {
+        logger.debug('Transcript exists but empty state showing, switching to transcript tab');
+        switchTab('transcript');
+      }
       
       logger.info('Successfully loaded tab state', { 
         currentTabId,
@@ -371,6 +393,24 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
+    // Check if transcript already exists for this video
+    if (currentTabState?.transcript && currentTabState.transcript.segments && currentTabState.transcript.segments.length > 0) {
+      logger.info('Transcript already exists, refreshing display', {
+        segmentCount: currentTabState.transcript.segments.length,
+        transcriptTitle: currentTabState.transcript.title
+      });
+      
+      // Switch to transcript tab and display the data
+      switchTab('transcript');
+      displayTranscript(currentTabState.transcript);
+      status.textContent = `📋 ${currentTabState.transcript.segments.length} segments already extracted`;
+      
+      // Enable the appropriate buttons
+      updateButtonStates();
+      
+      return;
+    }
+
     extractBtn.disabled = true;
     extractBtn.textContent = 'Extracting...';
     status.textContent = 'Extracting transcript from page...';
@@ -382,7 +422,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     try {
       // Use the current tab ID instead of querying for active tab
-      const response = await chrome.tabs.sendMessage(currentTabId, { type: 'EXTRACT_TRANSCRIPT' });
+      logger.debug('Sending EXTRACT_TRANSCRIPT message to content script', { 
+        currentTabId,
+        currentTabUrl: currentTabState?.url 
+      });
+      
+      const response = await chrome.tabs.sendMessage(currentTabId, { 
+        type: 'EXTRACT_TRANSCRIPT',
+        messageId: Date.now() // Add unique ID for debugging
+      });
       
       if (response?.transcript && response.transcript.length > 0) {
         const transcript = {
@@ -417,8 +465,21 @@ document.addEventListener('DOMContentLoaded', async () => {
         showTranscriptEmptyState();
       }
     } catch (error) {
-      console.error('Error extracting transcript:', error);
-      status.textContent = '❌ Error extracting transcript - reload the page and try again';
+      logger.error('Error extracting transcript', { 
+        error: error.message, 
+        currentTabId,
+        errorType: error.constructor.name 
+      });
+      
+      // Check if it's a content script connection error
+      if (error.message.includes('Could not establish connection') || 
+          error.message.includes('Receiving end does not exist')) {
+        status.textContent = '❌ Content script not loaded - refresh the YouTube page and try again';
+        logger.warn('Content script not available, user needs to refresh YouTube page');
+      } else {
+        status.textContent = `❌ Error extracting transcript: ${error.message}`;
+      }
+      
       await tabManager.setError(currentTabId, error.message);
       showTranscriptEmptyState();
     }
