@@ -3,8 +3,8 @@ class AnthropicAPI {
   constructor() {
     this.apiKey = null;
     this.baseURL = 'https://api.anthropic.com/v1/messages';
-    this.model = 'claude-3-5-sonnet-20241022';
-    this.maxTokens = 4000;
+    this.model = 'claude-sonnet-4-20250514';
+    this.maxTokens = 8000;
     
     // Initialize logger
     if (typeof DebugLogger !== 'undefined') {

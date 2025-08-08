@@ -41,7 +41,7 @@
 
     .btn-group {
       display: flex;
-      gap: 10px;
+      gap: 8px;
       margin-bottom: 10px;
     }
 
@@ -336,6 +336,33 @@
       text-align: center;
     }
 
+    /* Logs Panel Styles */
+    .logs-container {
+      max-height: 300px;
+      overflow-y: auto;
+      background: rgba(0,0,0,0.3);
+      border-radius: 4px;
+      padding: 10px;
+      margin: 10px 0;
+      font-family: 'Courier New', monospace;
+      font-size: 11px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .logs-container::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .logs-container::-webkit-scrollbar-track {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 3px;
+    }
+
+    .logs-container::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.3);
+      border-radius: 3px;
+    }
+
   </style>
 </head>
 <body>
@@ -348,6 +375,7 @@
   <div class="controls">
     <div class="btn-group">
       <button id="extract-btn" class="action-btn">Extract Transcript</button>
+      <button id="logs-btn" class="action-btn">📋 Logs</button>
       <button id="settings-btn" class="action-btn settings-btn">⚙️ Settings</button>
     </div>
     
@@ -373,6 +401,19 @@
       <button id="clear-api-key-btn" class="action-btn">Clear Key</button>
     </div>
     
+  </div>
+
+  <!-- Logs Panel (hidden by default) -->
+  <div id="logs-panel" class="settings-panel" style="display: none;">
+    <h3>📋 Extension Logs</h3>
+    <div class="logs-container" style="max-height: 300px; overflow-y: auto; background: rgba(0,0,0,0.3); border-radius: 4px; padding: 10px; margin: 10px 0; font-family: monospace; font-size: 11px;">
+      <div id="logs-content">Loading logs...</div>
+    </div>
+    <div class="btn-group">
+      <button id="copy-logs-btn" class="action-btn copy-btn">📋 Copy All Logs</button>
+      <button id="clear-logs-btn" class="action-btn">🗑️ Clear Logs</button>
+      <button id="refresh-logs-btn" class="action-btn">🔄 Refresh</button>
+    </div>
   </div>
 
   <!-- Tab Navigation -->

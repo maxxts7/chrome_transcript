@@ -1,6 +1,62 @@
 // Debug Utilities for YouTube AI Article Generator
 // Comprehensive logging and testing framework
 
+// Global log storage for extension
+window.ExtensionLogs = window.ExtensionLogs || {
+  logs: [],
+  maxLogs: 1000, // Keep only last 1000 logs
+  
+  add(level, component, message, data = null) {
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      level: level.toUpperCase(),
+      component,
+      message,
+      data: data ? JSON.stringify(data) : null
+    };
+    
+    this.logs.push(logEntry);
+    
+    // Keep only the most recent logs
+    if (this.logs.length > this.maxLogs) {
+      this.logs = this.logs.slice(-this.maxLogs);
+    }
+    
+    // Also store in chrome.storage for persistence
+    if (typeof chrome !== 'undefined' && chrome.storage) {
+      chrome.storage.local.set({ extensionLogs: this.logs }).catch(() => {
+        // Ignore storage errors
+      });
+    }
+  },
+  
+  get() {
+    return this.logs;
+  },
+  
+  clear() {
+    this.logs = [];
+    if (typeof chrome !== 'undefined' && chrome.storage) {
+      chrome.storage.local.remove('extensionLogs').catch(() => {
+        // Ignore storage errors
+      });
+    }
+  },
+  
+  async load() {
+    if (typeof chrome !== 'undefined' && chrome.storage) {
+      try {
+        const result = await chrome.storage.local.get('extensionLogs');
+        if (result.extensionLogs && Array.isArray(result.extensionLogs)) {
+          this.logs = result.extensionLogs;
+        }
+      } catch (error) {
+        // Ignore storage errors
+      }
+    }
+  }
+};
+
 class DebugLogger {
   constructor(componentName = 'Extension') {
     this.componentName = componentName;
@@ -76,6 +132,10 @@ class DebugLogger {
   debug(message, data = null) {
     if (!this.shouldLog('debug')) return;
     const formatted = this.formatMessage('debug', message, data);
+    
+    // Store in extension logs
+    window.ExtensionLogs.add('debug', this.componentName, message, data);
+    
     if (data) {
       console.log(formatted.prefix, formatted.message, data);
     } else {
@@ -86,6 +146,10 @@ class DebugLogger {
   info(message, data = null) {
     if (!this.shouldLog('info')) return;
     const formatted = this.formatMessage('info', message, data);
+    
+    // Store in extension logs
+    window.ExtensionLogs.add('info', this.componentName, message, data);
+    
     if (data) {
       console.info(formatted.prefix, formatted.message, data);
     } else {
@@ -96,6 +160,10 @@ class DebugLogger {
   warn(message, data = null) {
     if (!this.shouldLog('warn')) return;
     const formatted = this.formatMessage('warn', message, data);
+    
+    // Store in extension logs
+    window.ExtensionLogs.add('warn', this.componentName, message, data);
+    
     if (data) {
       console.warn(formatted.prefix, formatted.message, data);
     } else {
@@ -106,6 +174,10 @@ class DebugLogger {
   error(message, error = null) {
     if (!this.shouldLog('error')) return;
     const formatted = this.formatMessage('error', message, error);
+    
+    // Store in extension logs
+    window.ExtensionLogs.add('error', this.componentName, message, error);
+    
     if (error) {
       console.error(formatted.prefix, formatted.message, error);
       if (error.stack) {

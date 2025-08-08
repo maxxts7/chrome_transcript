@@ -22,6 +22,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // DOM elements
   const extractBtn = document.getElementById('extract-btn');
+  const logsBtn = document.getElementById('logs-btn');
   const settingsBtn = document.getElementById('settings-btn');
   const extractPointsBtn = document.getElementById('extract-points-btn');
   const generateArticleBtn = document.getElementById('generate-article-btn');
@@ -34,6 +35,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   const saveApiKeyBtn = document.getElementById('save-api-key-btn');
   const testApiKeyBtn = document.getElementById('test-api-key-btn');
   const clearApiKeyBtn = document.getElementById('clear-api-key-btn');
+  
+  // Logs panel elements
+  const logsPanel = document.getElementById('logs-panel');
+  const logsContent = document.getElementById('logs-content');
+  const copyLogsBtn = document.getElementById('copy-logs-btn');
+  const clearLogsBtn = document.getElementById('clear-logs-btn');
+  const refreshLogsBtn = document.getElementById('refresh-logs-btn');
   
   // Tab elements
   const tabBtns = document.querySelectorAll('.tab-btn');
@@ -64,6 +72,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Initialize on load
   logger.time('Extension Initialization');
+  
+  // Load existing logs from storage
+  await window.ExtensionLogs.load();
+  logger.debug('Extension logs loaded on startup');
+  
   await initializeExtension();
   logger.timeEnd('Extension Initialization');
 
@@ -89,6 +102,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Event Listeners
   extractBtn.addEventListener('click', handleExtractTranscript);
+  logsBtn.addEventListener('click', toggleLogsPanel);
   settingsBtn.addEventListener('click', toggleSettingsPanel);
   extractPointsBtn.addEventListener('click', handleExtractKeyPoints);
   generateArticleBtn.addEventListener('click', handleGenerateArticle);
@@ -97,6 +111,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   saveApiKeyBtn.addEventListener('click', handleSaveApiKey);
   testApiKeyBtn.addEventListener('click', handleTestApiKey);
   clearApiKeyBtn.addEventListener('click', handleClearApiKey);
+  
+  // Logs panel events
+  copyLogsBtn.addEventListener('click', handleCopyLogs);
+  clearLogsBtn.addEventListener('click', handleClearLogs);
+  refreshLogsBtn.addEventListener('click', handleRefreshLogs);
   apiKeyInput.addEventListener('input', handleApiKeyInput);
   
   // Tab navigation events
@@ -127,6 +146,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     logger.timeEnd('Tab Context Initialization');
     
     logger.info('AI Article Generator popup initialized successfully');
+  }
+
+  // Check if content script is loaded and responsive
+  async function checkContentScriptHealth(tabId) {
+    try {
+      logger.debug('Checking content script health for tab:', tabId);
+      const response = await chrome.tabs.sendMessage(tabId, { type: 'HEALTH_CHECK' });
+      logger.debug('Content script health response:', response);
+      return response?.status === 'ready';
+    } catch (error) {
+      logger.debug('Content script health check failed:', error);
+      return false;
+    }
   }
 
   // Get current active YouTube tab
@@ -314,7 +346,40 @@ document.addEventListener('DOMContentLoaded', async () => {
       logger.debug('Showing transcript empty state');
       showTranscriptEmptyState();
       if (!currentTabState.isProcessing) {
-        status.textContent = 'Ready to extract transcript';
+        // Check content script health before showing ready state
+        const isContentScriptReady = await checkContentScriptHealth(currentTabId);
+        if (isContentScriptReady) {
+          status.textContent = 'Ready to extract transcript';
+        } else {
+          // Check if we can reach the content script at all
+          try {
+            const response = await chrome.tabs.sendMessage(currentTabId, { type: 'HEALTH_CHECK' });
+            if (response) {
+              // Content script is loaded but YouTube DOM isn't ready
+              status.textContent = 'Waiting for YouTube player to load...';
+              logger.debug('Content script loaded but YouTube DOM not ready');
+              
+              // Start periodic check for YouTube DOM readiness
+              const checkReadiness = setInterval(async () => {
+                const isReady = await checkContentScriptHealth(currentTabId);
+                if (isReady) {
+                  status.textContent = 'Ready to extract transcript';
+                  clearInterval(checkReadiness);
+                  logger.debug('YouTube DOM became ready, updated status');
+                }
+              }, 2000);
+              
+              // Clear interval after 30 seconds to avoid infinite checking
+              setTimeout(() => clearInterval(checkReadiness), 30000);
+            } else {
+              status.textContent = 'Loading YouTube integration...';
+              logger.debug('Content script not responding');
+            }
+          } catch (error) {
+            status.textContent = 'Loading YouTube integration...';
+            logger.debug('Content script not ready, triggering background injection');
+          }
+        }
       }
     }
 
@@ -381,8 +446,118 @@ document.addEventListener('DOMContentLoaded', async () => {
     await tabManager.setProcessingStatus(currentTabId, true, 'extracting transcript');
 
     try {
-      // Use the current tab ID instead of querying for active tab
-      const response = await chrome.tabs.sendMessage(currentTabId, { type: 'EXTRACT_TRANSCRIPT' });
+      // First try to send message to content script
+      let response;
+      try {
+        response = await chrome.tabs.sendMessage(currentTabId, { type: 'EXTRACT_TRANSCRIPT' });
+      } catch (messageError) {
+        // Content script might not be loaded, try to initialize it
+        logger.warn('Content script not responding, attempting initialization', messageError);
+        status.textContent = 'Initializing extension for this tab...';
+        
+        try {
+          logger.info('Attempting automatic content script injection');
+          status.textContent = 'Auto-fixing: Injecting content script...';
+          
+          // First test if background script is responsive
+          try {
+            const statusCheck = await chrome.runtime.sendMessage({ type: 'GET_STATUS' });
+            logger.debug('Background script status check', statusCheck);
+            
+            if (!statusCheck || statusCheck.status !== 'active') {
+              throw new Error(`Background script unhealthy: ${JSON.stringify(statusCheck)}`);
+            }
+          } catch (statusError) {
+            logger.error('Background script not responding', {
+              error: statusError.message,
+              name: statusError.name,
+              stack: statusError.stack
+            });
+            throw new Error(`Extension background script not responding: ${statusError.message}`);
+          }
+          
+          logger.info('Background script confirmed active, proceeding with content script injection');
+          
+          const initResult = await chrome.runtime.sendMessage({ 
+            type: 'INITIALIZE_CONTENT_SCRIPT', 
+            tabId: currentTabId 
+          });
+          
+          logger.debug('Content script injection result', { 
+            success: initResult?.success, 
+            error: initResult?.error,
+            message: initResult?.message,
+            details: initResult?.details,
+            fullResult: initResult
+          });
+          
+          if (initResult?.success) {
+            logger.info('Content script initialized successfully, retrying extraction');
+            status.textContent = 'Auto-fix successful! Extracting transcript...';
+            
+            // Clear any previous errors
+            await tabManager.clearError(currentTabId);
+            
+            // Wait a moment for content script to fully initialize
+            await new Promise(resolve => setTimeout(resolve, 800));
+            
+            // Verify content script is actually loaded
+            try {
+              const verifyResult = await chrome.tabs.sendMessage(currentTabId, { type: 'GET_STORED_TRANSCRIPT' });
+              logger.debug('Content script verification successful', verifyResult);
+            } catch (verifyError) {
+              logger.warn('Content script verification failed', verifyError);
+              throw new Error('Content script injection appeared successful but script is not responding');
+            }
+            
+            // Try the extraction again after initialization
+            response = await chrome.tabs.sendMessage(currentTabId, { type: 'EXTRACT_TRANSCRIPT' });
+            logger.info('Transcript extraction retry successful after auto-fix');
+            
+          } else {
+            const errorDetails = {
+              success: initResult?.success,
+              error: initResult?.error,
+              message: initResult?.message,
+              details: initResult?.details,
+              stack: initResult?.stack
+            };
+            
+            logger.error('Content script initialization failed', errorDetails);
+            
+            if (initResult?.error?.includes('Not a YouTube page')) {
+              throw new Error('Current tab is not a YouTube page');
+            } else if (initResult?.error?.includes('Injection failed')) {
+              throw new Error(`Script injection failed: ${initResult.error}`);
+            } else {
+              throw new Error(`Auto-fix failed: ${initResult?.error || 'Unknown initialization error'}. Please refresh the page.`);
+            }
+          }
+        } catch (initError) {
+          logger.error('Content script initialization error', { 
+            error: initError.message,
+            stack: initError.stack,
+            type: typeof initError,
+            name: initError.name,
+            currentTabId,
+            initError 
+          });
+          
+          // Provide more specific error messages based on common failure scenarios
+          let userMessage;
+          if (initError.message.includes('Extension context invalidated')) {
+            userMessage = 'Extension was reloaded. Please refresh the page and try again.';
+          } else if (initError.message.includes('not responding')) {
+            userMessage = 'Extension background script is not responding. Try restarting Chrome.';
+          } else if (initError.message.includes('YouTube page')) {
+            userMessage = 'Please navigate to a YouTube video page first.';
+          } else {
+            userMessage = `Auto-fix failed: ${initError.message}. Please refresh the page and try again.`;
+          }
+          
+          throw new Error(userMessage);
+        }
+      }
       
       if (response?.transcript && response.transcript.length > 0) {
         const transcript = {
@@ -867,5 +1042,149 @@ document.addEventListener('DOMContentLoaded', async () => {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+  }
+
+  // Logs Panel Functions
+  function toggleLogsPanel() {
+    logger.info('Toggling logs panel');
+    const isVisible = logsPanel.style.display !== 'none';
+    
+    if (isVisible) {
+      logsPanel.style.display = 'none';
+    } else {
+      logsPanel.style.display = 'block';
+      loadLogs(); // Load logs when showing panel
+    }
+    
+    // Hide settings panel if it's open
+    if (!isVisible && settingsPanel.style.display !== 'none') {
+      settingsPanel.style.display = 'none';
+    }
+  }
+
+  async function loadLogs() {
+    logger.debug('Loading extension logs');
+    
+    try {
+      // Load logs from storage first
+      await window.ExtensionLogs.load();
+      
+      const logs = window.ExtensionLogs.get();
+      logger.debug('Retrieved logs', { count: logs.length });
+      
+      if (logs.length === 0) {
+        logsContent.innerHTML = '<div style="color: #888; text-align: center; padding: 20px;">No logs available</div>';
+        return;
+      }
+      
+      // Format logs for display
+      let logHtml = '';
+      const recentLogs = logs.slice(-50); // Show only last 50 logs
+      
+      recentLogs.forEach(log => {
+        const timestamp = new Date(log.timestamp).toLocaleTimeString();
+        const levelColor = getLevelColor(log.level);
+        const dataStr = log.data ? `\n${log.data}` : '';
+        
+        logHtml += `
+          <div style="margin-bottom: 8px; padding: 4px; border-left: 3px solid ${levelColor}; background: rgba(255,255,255,0.05);">
+            <div style="color: #888; font-size: 10px;">${timestamp} [${log.component}]</div>
+            <div style="color: ${levelColor}; font-weight: bold; display: inline;">${log.level}</div>
+            <div style="color: #fff; margin-left: 8px; display: inline;">${escapeHtml(log.message)}</div>
+            ${dataStr ? `<div style="color: #ccc; font-size: 10px; margin-top: 2px; white-space: pre-wrap;">${escapeHtml(dataStr)}</div>` : ''}
+          </div>
+        `;
+      });
+      
+      logsContent.innerHTML = logHtml;
+      
+      // Scroll to bottom
+      logsContent.scrollTop = logsContent.scrollHeight;
+      
+    } catch (error) {
+      logger.error('Failed to load logs', error);
+      logsContent.innerHTML = '<div style="color: #ff4444; text-align: center; padding: 20px;">Error loading logs</div>';
+    }
+  }
+
+  function getLevelColor(level) {
+    const colors = {
+      'DEBUG': '#888',
+      'INFO': '#00ff88',
+      'WARN': '#ffa500',
+      'ERROR': '#ff4444'
+    };
+    return colors[level] || '#fff';
+  }
+
+  async function handleCopyLogs() {
+    logger.info('Copying logs to clipboard');
+    
+    try {
+      const logs = window.ExtensionLogs.get();
+      
+      if (logs.length === 0) {
+        status.textContent = '⚠️ No logs to copy';
+        return;
+      }
+      
+      // Show copying feedback
+      copyLogsBtn.textContent = '📋 Copying...';
+      copyLogsBtn.disabled = true;
+      
+      // Format logs as text
+      let logText = `YouTube AI Extension Logs - ${new Date().toISOString()}\n`;
+      logText += '='.repeat(60) + '\n';
+      logText += `Total Log Entries: ${logs.length}\n`;
+      logText += `Session: ${window.location.href}\n`;
+      logText += '='.repeat(60) + '\n\n';
+      
+      logs.forEach(log => {
+        const timestamp = new Date(log.timestamp).toISOString();
+        const dataStr = log.data ? `\n    Data: ${log.data}` : '';
+        logText += `[${timestamp}] ${log.level.padEnd(5)} [${log.component}] ${log.message}${dataStr}\n`;
+      });
+      
+      logText += '\n' + '='.repeat(60) + '\n';
+      logText += 'End of logs\n';
+      
+      await copyToClipboard(logText);
+      logger.info('Logs copied successfully', { logCount: logs.length });
+      
+      // Success feedback
+      copyLogsBtn.textContent = '✅ Copied!';
+      status.textContent = `📋 Copied ${logs.length} log entries to clipboard`;
+      
+      // Reset button after 2 seconds
+      setTimeout(() => {
+        copyLogsBtn.textContent = '📋 Copy All Logs';
+        copyLogsBtn.disabled = false;
+      }, 2000);
+      
+    } catch (error) {
+      logger.error('Failed to copy logs', error);
+      status.textContent = '❌ Failed to copy logs';
+      
+      // Reset button on error
+      copyLogsBtn.textContent = '📋 Copy All Logs';
+      copyLogsBtn.disabled = false;
+    }
+  }
+
+  async function handleClearLogs() {
+    logger.info('Clearing extension logs');
+    
+    if (confirm('Are you sure you want to clear all logs?')) {
+      window.ExtensionLogs.clear();
+      logsContent.innerHTML = '<div style="color: #888; text-align: center; padding: 20px;">Logs cleared</div>';
+      status.textContent = '🗑️ Logs cleared';
+      logger.info('Extension logs cleared by user');
+    }
+  }
+
+  async function handleRefreshLogs() {
+    logger.info('Refreshing logs display');
+    await loadLogs();
+    status.textContent = '🔄 Logs refreshed';
   }
 });

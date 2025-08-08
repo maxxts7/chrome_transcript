@@ -180,6 +180,26 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     logger.debug('Tab manager initialized for update cleanup');
     // await manager.cleanupOldTabs(); // Will implement when needed
   }
+  
+  // Just initialize tab tracking for existing YouTube tabs
+  try {
+    const tabs = await chrome.tabs.query({});
+    const manager = await getTabManager();
+    
+    for (const tab of tabs) {
+      if (manager.isYouTubeUrl(tab.url)) {
+        logger.debug('Initializing existing YouTube tab', { 
+          tabId: tab.id, 
+          url: tab.url 
+        });
+        
+        // Just update tab info in storage, don't inject scripts
+        await manager.updateTabInfo(tab.id, tab.url, tab.title);
+      }
+    }
+  } catch (error) {
+    logger.error('Error during tab initialization', error);
+  }
 });
 
 // Extension startup handler
@@ -254,7 +274,17 @@ chrome.tabs.onRemoved.addListener(async (tabId, removeInfo) => {
 // Handle messages from content scripts or popup
 chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
   if (!logger) initializeLogger();
-  logger.debug('Background received message', { type: message.type, from: sender.tab ? 'content' : 'popup' });
+  
+  // Always log to console as fallback to ensure we can debug
+  console.log('🔧 [Background] Message received:', { 
+    type: message.type, 
+    from: sender.tab ? 'content' : 'popup',
+    tabId: message.tabId || sender.tab?.id || 'unknown'
+  });
+  
+  if (logger) {
+    logger.debug('Background received message', { type: message.type, from: sender.tab ? 'content' : 'popup' });
+  }
   
   try {
     switch (message.type) {
@@ -319,6 +349,216 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
         const cleanupManager = await getTabManager();
         // Implement cleanup logic here
         sendResponse({ success: true });
+        break;
+
+      case 'INITIALIZE_CONTENT_SCRIPT':
+        // Initialize content script in a specific tab
+        console.log('🚀 [Background] INITIALIZE_CONTENT_SCRIPT requested for tab:', message.tabId);
+        try {
+          const { tabId } = message;
+          if (logger) {
+            logger.info('Content script initialization requested', { tabId });
+          }
+          
+          // Verify tab exists and is accessible
+          let tab;
+          try {
+            tab = await chrome.tabs.get(tabId);
+          } catch (tabError) {
+            logger.error('Failed to get tab information', { tabId, error: tabError.message });
+            sendResponse({ 
+              success: false, 
+              error: `Tab not found or inaccessible: ${tabError.message}`
+            });
+            return;
+          }
+          
+          logger.debug('Target tab info', { 
+            tabId, 
+            url: tab.url, 
+            status: tab.status,
+            title: tab.title?.substring(0, 50),
+            active: tab.active,
+            windowId: tab.windowId
+          });
+          
+          // Check if it's a valid YouTube page
+          if (!tab.url || !tab.url.includes('youtube.com')) {
+            logger.warn('Not a YouTube tab', { tabId, url: tab.url });
+            sendResponse({ 
+              success: false, 
+              error: 'Not a YouTube page' 
+            });
+            return;
+          }
+          
+          // Check if tab is in a valid state for script injection
+          if (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) {
+            logger.warn('Cannot inject into system pages', { tabId, url: tab.url });
+            sendResponse({ 
+              success: false, 
+              error: 'Cannot inject content script into system pages'
+            });
+            return;
+          }
+          
+          logger.info('Tab validation passed, checking current script status', { tabId });
+          
+          // First, check if content scripts are already loaded
+          let currentStatus;
+          try {
+            const statusCheck = await chrome.scripting.executeScript({
+              target: { tabId: tabId },
+              function: () => {
+                return {
+                  loaded: !!window.youtubeTranscriptExtractorLoaded,
+                  hasDebugUtils: typeof DebugLogger !== 'undefined',
+                  hasExtensionLogs: !!window.ExtensionLogs,
+                  url: window.location.href,
+                  timestamp: Date.now(),
+                  status: 'checked'
+                };
+              }
+            });
+            
+            currentStatus = statusCheck[0]?.result;
+            logger.debug('Current script status', { tabId, currentStatus });
+            
+          } catch (statusError) {
+            logger.warn('Could not check current status', { tabId, statusError });
+            currentStatus = { status: 'unknown' };
+          }
+          
+          // If scripts are already loaded and working, no need to inject
+          if (currentStatus?.loaded && currentStatus?.hasDebugUtils) {
+            logger.info('Content scripts already loaded and working', { tabId, currentStatus });
+            sendResponse({ 
+              success: true, 
+              message: 'Content scripts already loaded',
+              details: currentStatus 
+            });
+            return;
+          }
+          
+          // Scripts not loaded, try to inject them
+          try {
+            logger.info('Scripts not loaded, attempting injection', { tabId });
+            
+            await chrome.scripting.executeScript({
+              target: { tabId: tabId },
+              files: ['debug-utils.js', 'content.js']
+            });
+            
+            logger.info('Content script files injected successfully', { tabId });
+            
+          } catch (injectionError) {
+            logger.error('Script injection failed', { 
+              tabId, 
+              error: injectionError.message, 
+              name: injectionError.name,
+              stack: injectionError.stack 
+            });
+            
+            // Check for common injection errors
+            if (injectionError.message.includes('Cannot access')) {
+              throw new Error('Permission denied: Cannot access this tab');
+            } else if (injectionError.message.includes('The extensions gallery')) {
+              throw new Error('Cannot inject scripts into Chrome Web Store pages');
+            } else if (injectionError.message.includes('Duplicate script')) {
+              // Scripts might already be loaded but not responding - try to reinitialize
+              logger.warn('Duplicate script injection, attempting reinitialize', { tabId });
+            } else {
+              throw new Error(`Script injection failed: ${injectionError.message}`);
+            }
+          }
+          
+          // Wait for scripts to initialize
+          logger.debug('Waiting for scripts to initialize', { tabId });
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+          // Test if content script is now available and working
+          let testResult;
+          try {
+            const executeResult = await chrome.scripting.executeScript({
+              target: { tabId: tabId },
+              function: () => {
+                try {
+                  return {
+                    loaded: !!window.youtubeTranscriptExtractorLoaded,
+                    hasDebugUtils: typeof DebugLogger !== 'undefined',
+                    hasExtensionLogs: !!window.ExtensionLogs,
+                    url: window.location.href,
+                    isYouTube: window.location.hostname.includes('youtube.com'),
+                    documentReady: document.readyState,
+                    timestamp: Date.now(),
+                    success: true
+                  };
+                } catch (error) {
+                  return {
+                    success: false,
+                    error: error.message,
+                    timestamp: Date.now()
+                  };
+                }
+              }
+            });
+            
+            testResult = executeResult[0]?.result;
+          } catch (testError) {
+            logger.error('Content script test failed', { tabId, testError });
+            testResult = { 
+              success: false, 
+              error: `Test execution failed: ${testError.message}` 
+            };
+          }
+          
+          logger.debug('Content script test result', { tabId, testResult });
+          
+          if (testResult?.success && testResult?.loaded && testResult?.hasDebugUtils) {
+            console.log('✅ [Background] Content script initialized successfully for tab:', tabId);
+            if (logger) {
+              logger.info('Content script initialized and verified successfully', { 
+                tabId, 
+                details: testResult 
+              });
+            }
+            sendResponse({ 
+              success: true, 
+              message: 'Content script initialized successfully',
+              details: testResult 
+            });
+          } else {
+            console.log('❌ [Background] Content script verification failed for tab:', tabId, testResult);
+            if (logger) {
+              logger.warn('Content script injection incomplete or failed verification', { 
+                tabId, 
+                testResult 
+              });
+            }
+            
+            const errorMsg = testResult?.error || 
+                           `Verification failed: ${JSON.stringify(testResult)}`;
+            
+            sendResponse({ 
+              success: false, 
+              error: errorMsg,
+              details: testResult
+            });
+          }
+          
+        } catch (error) {
+          logger.error('Error during content script initialization', { 
+            tabId: message.tabId,
+            error: error.message,
+            name: error.name,
+            stack: error.stack
+          });
+          sendResponse({ 
+            success: false, 
+            error: `Initialization failed: ${error.message}`,
+            stack: error.stack
+          });
+        }
         break;
         
       default:

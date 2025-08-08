@@ -1,6 +1,14 @@
 (function() {
   'use strict';
 
+  // Mark content script as loaded immediately
+  window.youtubeTranscriptExtractorLoaded = true;
+  console.log('🚀 Content script started loading', { 
+    url: window.location.href, 
+    time: new Date().toISOString(),
+    readyState: document.readyState 
+  });
+
   // Initialize debug logger for content script
   let logger = null;
   
@@ -391,33 +399,108 @@
   }
 
   // Auto-extract transcript on YouTube pages
-  function autoExtractTranscript() {
+  window.autoExtractTranscript = function autoExtractTranscript() {
     debugLog('🎬 autoExtractTranscript() called');
     if (window.location.hostname.includes('youtube.com')) {
-      debugLog('✅ On YouTube domain, scheduling extraction...');
-      // Wait for page to load, then try to extract
-      setTimeout(async () => {
-        debugLog('⏰ First extraction attempt (2s delay)');
-        const transcript = await logTranscript();
-        if (!transcript || transcript.length === 0) {
-          debugLog('⏰ No transcript found, trying again in 3s...');
-          // Try again after more loading time
-          setTimeout(async () => {
-            debugLog('⏰ Second extraction attempt (5s total delay)');
-            await logTranscript();
-          }, 3000);
-        }
-      }, 2000);
+      debugLog('✅ On YouTube domain, checking if we should extract...');
+      
+      // Check if we're on a watch page
+      if (window.location.pathname === '/watch') {
+        debugLog('📺 On YouTube watch page, scheduling extraction...');
+        // Wait for DOM to be ready before attempting extraction
+        setTimeout(async () => {
+          debugLog('⏰ Waiting for YouTube DOM to be ready...');
+          const isDOMReady = await waitForYouTubeDOMReady();
+          
+          if (isDOMReady) {
+            debugLog('⏰ DOM ready, attempting extraction');
+            const transcript = await logTranscript();
+            if (!transcript || transcript.length === 0) {
+              debugLog('⏰ No transcript found, trying again in 2s...');
+              // Try again after more loading time
+              setTimeout(async () => {
+                debugLog('⏰ Second extraction attempt');
+                await logTranscript();
+              }, 2000);
+            }
+          } else {
+            debugLog('⏰ DOM not ready after timeout, skipping auto-extraction');
+          }
+        }, 1000);
+      } else {
+        debugLog('🏠 Not on watch page, skipping auto-extraction');
+      }
     } else {
       debugLog('❌ Not on YouTube domain, skipping auto-extraction');
     }
+  };
+
+  // Function to check if YouTube DOM is ready for transcript extraction
+  function waitForYouTubeDOMReady() {
+    return new Promise((resolve) => {
+      const checkReady = () => {
+        const player = document.querySelector('#movie_player');
+        const captionsBtn = document.querySelector('.ytp-subtitles-button, .ytp-cc-button');
+        const videoTitle = document.querySelector('h1.ytd-watch-metadata yt-formatted-string, #title h1');
+        
+        if (player && videoTitle) {
+          debugLog('✅ YouTube DOM is ready for extraction');
+          resolve(true);
+        } else {
+          debugLog('⏳ YouTube DOM not ready, waiting...', { 
+            hasPlayer: !!player, 
+            hasCaptionsBtn: !!captionsBtn, 
+            hasTitle: !!videoTitle 
+          });
+          setTimeout(checkReady, 500);
+        }
+      };
+      
+      // Add timeout to prevent infinite waiting
+      setTimeout(() => {
+        debugLog('⏰ YouTube DOM readiness check timed out after 10s');
+        resolve(false);
+      }, 10000);
+      
+      checkReady();
+    });
+  }
+
+  // Check if content script is healthy and ready
+  function checkContentScriptHealth() {
+    const isYouTubeWatch = window.location.pathname === '/watch';
+    const isYouTubeDomain = window.location.hostname.includes('youtube.com');
+    
+    // Content script is loaded if we can respond, but readiness depends on YouTube DOM
+    const scriptLoaded = true; // If we can respond to this message, script is loaded
+    const player = document.querySelector('#movie_player');
+    const domReady = player && isYouTubeWatch;
+    
+    debugLog('🏥 Content script health check:', { 
+      scriptLoaded,
+      isYouTubeDomain,
+      isYouTubeWatch, 
+      hasPlayer: !!player, 
+      domReady 
+    });
+    
+    // Return different status based on what's ready
+    if (!isYouTubeDomain) return false;
+    if (!isYouTubeWatch) return false;
+    return domReady; // Only ready when YouTube DOM is ready
   }
 
   // Listen for messages from popup
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     debugLog('📨 Message received from popup:', message);
     
-    if (message.type === 'EXTRACT_TRANSCRIPT') {
+    if (message.type === 'HEALTH_CHECK') {
+      debugLog('🏥 Processing HEALTH_CHECK request');
+      const isReady = checkContentScriptHealth();
+      sendResponse({ status: isReady ? 'ready' : 'not_ready', url: window.location.href });
+      return true;
+      
+    } else if (message.type === 'EXTRACT_TRANSCRIPT') {
       debugLog('🎯 Processing EXTRACT_TRANSCRIPT request');
       
       // Handle async extraction
@@ -453,12 +536,59 @@
   });
 
 
+  // Handle YouTube SPA navigation
+  let currentUrl = window.location.href;
+  
+  function handleUrlChange() {
+    const newUrl = window.location.href;
+    if (newUrl !== currentUrl) {
+      debugLog('🔄 YouTube SPA navigation detected', { from: currentUrl, to: newUrl });
+      currentUrl = newUrl;
+      
+      // Re-initialize for new video
+      if (window.location.hostname.includes('youtube.com') && window.location.pathname === '/watch') {
+        debugLog('🎬 New video detected, re-initializing...');
+        autoExtractTranscript();
+      }
+    }
+  }
+  
+  // Listen for URL changes (YouTube SPA navigation)
+  const observer = new MutationObserver(handleUrlChange);
+  observer.observe(document, { childList: true, subtree: true });
+  
+  // Also listen for popstate events (back/forward navigation)
+  window.addEventListener('popstate', handleUrlChange);
+  
+  // Listen for pushstate/replacestate events (programmatic navigation)
+  const originalPushState = history.pushState;
+  const originalReplaceState = history.replaceState;
+  
+  history.pushState = function(...args) {
+    originalPushState.apply(this, args);
+    setTimeout(handleUrlChange, 0);
+  };
+  
+  history.replaceState = function(...args) {
+    originalReplaceState.apply(this, args);
+    setTimeout(handleUrlChange, 0);
+  };
+
   // Initialize transcript extraction for YouTube
   debugLog('🚀 Initializing YouTube Transcript Extractor...');
   debugLog('🌐 Current URL:', window.location.href);
   debugLog('📄 Document ready state:', document.readyState);
   
-  autoExtractTranscript();
+  // Wait for DOM to be ready if needed
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', autoExtractTranscript);
+  } else {
+    // DOM is already ready, run immediately
+    autoExtractTranscript();
+  }
 
   console.log('📝 YouTube Transcript Extractor initialized on:', window.location.href);
+  
+  // Mark content script as loaded
+  window.youtubeTranscriptExtractorLoaded = true;
 })();

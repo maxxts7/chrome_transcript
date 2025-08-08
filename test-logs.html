@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Extension Logs</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background: #222; color: white; }
+        button { margin: 10px; padding: 10px 20px; background: #00ff88; color: #222; border: none; border-radius: 4px; cursor: pointer; }
+        #logs { background: #000; padding: 10px; margin: 20px 0; border-radius: 4px; max-height: 400px; overflow-y: auto; font-family: monospace; font-size: 12px; }
+        .log-entry { margin: 5px 0; padding: 5px; border-left: 3px solid #00ff88; }
+    </style>
+</head>
+<body>
+    <h1>Extension Logs Test</h1>
+    
+    <div>
+        <button onclick="testBasicLogging()">Test Basic Logging</button>
+        <button onclick="testErrorLogging()">Test Error Logging</button>
+        <button onclick="testWithData()">Test Logging with Data</button>
+        <button onclick="displayLogs()">Display Logs</button>
+        <button onclick="clearLogs()">Clear Logs</button>
+        <button onclick="copyLogs()">Copy All Logs</button>
+    </div>
+    
+    <div id="logs"></div>
+
+    <script src="debug-utils.js"></script>
+    <script>
+        // Initialize logger
+        const logger = new DebugLogger('TestPage');
+        
+        function testBasicLogging() {
+            logger.info('Basic logging test started');
+            logger.debug('This is a debug message');
+            logger.info('This is an info message'); 
+            logger.warn('This is a warning message');
+            displayLogs();
+        }
+        
+        function testErrorLogging() {
+            logger.info('Error logging test started');
+            try {
+                throw new Error('Test error for logging');
+            } catch (error) {
+                logger.error('Caught test error', error);
+            }
+            displayLogs();
+        }
+        
+        function testWithData() {
+            logger.info('Data logging test started');
+            
+            const testData = {
+                userId: 'user123',
+                action: 'test_action',
+                timestamp: Date.now(),
+                nested: {
+                    key: 'value',
+                    array: [1, 2, 3]
+                }
+            };
+            
+            logger.info('Logging with complex data', testData);
+            logger.warn('Warning with data', { warning: 'test warning', level: 2 });
+            displayLogs();
+        }
+        
+        function displayLogs() {
+            const logs = window.ExtensionLogs.get();
+            const logsDiv = document.getElementById('logs');
+            
+            if (logs.length === 0) {
+                logsDiv.innerHTML = '<div style="color: #888;">No logs available</div>';
+                return;
+            }
+            
+            let html = `<h3>Extension Logs (${logs.length} entries)</h3>`;
+            
+            logs.slice(-20).forEach(log => {
+                const timestamp = new Date(log.timestamp).toLocaleTimeString();
+                const levelColor = getLevelColor(log.level);
+                const dataStr = log.data ? `<br><span style="color: #ccc; font-size: 10px;">Data: ${log.data}</span>` : '';
+                
+                html += `
+                    <div class="log-entry" style="border-left-color: ${levelColor};">
+                        <span style="color: #888; font-size: 10px;">${timestamp} [${log.component}]</span>
+                        <span style="color: ${levelColor}; font-weight: bold; margin-left: 10px;">${log.level}</span>
+                        <span style="color: white; margin-left: 10px;">${log.message}</span>
+                        ${dataStr}
+                    </div>
+                `;
+            });
+            
+            logsDiv.innerHTML = html;
+            logsDiv.scrollTop = logsDiv.scrollHeight;
+        }
+        
+        function getLevelColor(level) {
+            const colors = {
+                'DEBUG': '#888',
+                'INFO': '#00ff88',
+                'WARN': '#ffa500',
+                'ERROR': '#ff4444'
+            };
+            return colors[level] || '#fff';
+        }
+        
+        function clearLogs() {
+            window.ExtensionLogs.clear();
+            displayLogs();
+            logger.info('Logs cleared by user');
+        }
+        
+        async function copyLogs() {
+            const logs = window.ExtensionLogs.get();
+            
+            if (logs.length === 0) {
+                alert('No logs to copy');
+                return;
+            }
+            
+            let logText = `Extension Logs - ${new Date().toISOString()}\n`;
+            logText += '='.repeat(50) + '\n\n';
+            
+            logs.forEach(log => {
+                const timestamp = new Date(log.timestamp).toISOString();
+                const dataStr = log.data ? `\nData: ${log.data}` : '';
+                logText += `[${timestamp}] ${log.level} [${log.component}] ${log.message}${dataStr}\n\n`;
+            });
+            
+            try {
+                await navigator.clipboard.writeText(logText);
+                alert(`Copied ${logs.length} log entries to clipboard!`);
+            } catch (error) {
+                console.error('Failed to copy logs:', error);
+                alert('Failed to copy logs to clipboard');
+            }
+        }
+        
+        // Initial log
+        logger.info('Test page loaded successfully');
+        displayLogs();
+    </script>
+</body>
+</html>

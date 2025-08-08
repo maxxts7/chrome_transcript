@@ -1,0 +1,42 @@
+{
+  "name": "youtube-ai-article-generator",
+  "version": "2.0.0",
+  "description": "Extract YouTube transcripts and generate AI-powered articles",
+  "scripts": {
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:debug": "jest --verbose",
+    "test:logs": "ls -la test-logs/ && echo '\n--- Latest Log File ---' && tail -50 test-logs/$(ls -t test-logs/ | head -1)",
+    "lint": "echo 'No linter configured yet'",
+    "build": "echo 'No build process configured yet'"
+  },
+  "jest": {
+    "testEnvironment": "jsdom",
+    "setupFilesAfterEnv": ["<rootDir>/jest.setup.js"],
+    "collectCoverageFrom": [
+      "**/*.js",
+      "!**/node_modules/**",
+      "!**/coverage/**",
+      "!jest.config.js",
+      "!jest.setup.js"
+    ],
+    "testMatch": [
+      "**/__tests__/**/*.js",
+      "**/*.test.js",
+      "**/*.spec.js"
+    ],
+    "moduleFileExtensions": [
+      "js",
+      "json"
+    ],
+    "verbose": true,
+    "silent": false
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0",
+    "@testing-library/jest-dom": "^6.1.4"
+  },
+  "dependencies": {}
+}
